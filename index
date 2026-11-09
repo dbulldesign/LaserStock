@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sheet nesting calculator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@600&display=swap" rel="stylesheet">
+<style>
+:root {
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  color-scheme: light;
+  --bg: #eceeec;
+  --panel: #f6f7f5;
+  --surface: #ffffff;
+  --ink: #1c2126;
+  --muted: #5f6a73;
+  --line: #cfd5d8;
+  --line-strong: #9aa4ab;
+  --accent: #f05a0f;
+  --accent-ink: #ffffff;
+  --sheet: #d8dcdf;
+  --sheet-edge: #8f989f;
+  --margin-line: #3f484f;
+  --focus: #1d6fe0;
+  --warn-bg: #fff3e8;
+  --warn-ink: #8a3a05;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #15181b;
+    --panel: #1b1f23;
+    --surface: #22272c;
+    --ink: #e9ecee;
+    --muted: #98a3ac;
+    --line: #343b41;
+    --line-strong: #4b545c;
+    --accent: #ff7a33;
+    --accent-ink: #1a1a1a;
+    --sheet: #2e3439;
+    --sheet-edge: #5c666e;
+    --margin-line: #b4bec5;
+    --focus: #6ea8ff;
+    --warn-bg: #3a2614;
+    --warn-ink: #ffc9a3;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #15181b;
+  --panel: #1b1f23;
+  --surface: #22272c;
+  --ink: #e9ecee;
+  --muted: #98a3ac;
+  --line: #343b41;
+  --line-strong: #4b545c;
+  --accent: #ff7a33;
+  --accent-ink: #1a1a1a;
+  --sheet: #2e3439;
+  --sheet-edge: #5c666e;
+  --margin-line: #b4bec5;
+  --focus: #6ea8ff;
+  --warn-bg: #3a2614;
+  --warn-ink: #ffc9a3;
+}
+html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+*, *::before, *::after { box-sizing: inherit; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Barlow", "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+button, input, select { font: inherit; color: inherit; }
+
+.top {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 28px;
+  padding: 22px 24px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.top h1 {
+  font-family: "Barlow Semi Condensed", "Barlow", sans-serif;
+  font-weight: 600; font-size: 26px; line-height: 1.1; margin: 0; letter-spacing: -0.01em;
+}
+.top p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; margin-left: auto; }
+.seg button { background: var(--surface); border: 0; padding: 7px 14px; cursor: pointer; color: var(--muted); }
+.seg button + button { border-left: 1px solid var(--line-strong); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+
+.layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); min-height: calc(100vh - 90px); }
+.controls { background: var(--panel); border-right: 1px solid var(--line); padding: 18px 20px 28px; }
+@media (min-width: 900px) { .controls { position: sticky; top: env(safe-area-inset-top, 0px); max-height: 100vh; overflow-y: auto; } }
+.results { padding: 22px 24px 40px; min-width: 0; }
+@media (max-width: 899px) {
+  .layout { grid-template-columns: 1fr; }
+  .controls { border-right: 0; border-bottom: 1px solid var(--line); }
+}
+
+.group { padding: 14px 0 18px; border-bottom: 1px solid var(--line); }
+.group:last-child { border-bottom: 0; }
+.group h2 { font-weight: 600; font-size: 15px; margin: 0 0 10px; }
+.group h2 small { font-weight: 400; color: var(--muted); margin-left: 6px; }
+label.field { display: block; }
+label.field > span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+select, input[type="number"] {
+  width: 100%; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface);
+}
+input[type="number"] { font-variant-numeric: tabular-nums; }
+.unit-in { position: relative; }
+.unit-in input { padding-right: 36px; }
+.unit-in span { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 13px; pointer-events: none; }
+
+.slider { margin-top: 10px; }
+.slider .lbl { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--muted); margin-bottom: 2px; }
+.slider .lbl strong { color: var(--ink); font-weight: 500; font-size: 14px; }
+.slider .track { display: grid; grid-template-columns: 1fr 92px; gap: 10px; align-items: center; }
+input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; margin: 0; height: 28px; }
+
+.circ-row { display: grid; grid-template-columns: 14px 1fr 1fr 28px; gap: 8px; align-items: center; margin-bottom: 8px; }
+.circ-head { display: grid; grid-template-columns: 14px 1fr 1fr 28px; gap: 8px; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.swatch { width: 14px; height: 14px; border-radius: 50%; }
+.circ-row .x { border: 0; background: transparent; color: var(--muted); cursor: pointer; width: 28px; height: 28px; border-radius: 5px; font-size: 18px; line-height: 1; }
+.circ-row .x:hover { background: var(--line); color: var(--ink); }
+.btn { display: inline-block; border: 1px solid var(--line-strong); background: var(--surface); border-radius: 5px; padding: 7px 12px; cursor: pointer; }
+.btn:hover { border-color: var(--ink); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 500; }
+.hint { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+
+.answer { margin: 0 0 6px; font-family: "Barlow Semi Condensed", "Barlow", sans-serif; font-weight: 600; font-size: 40px; line-height: 1.05; letter-spacing: -0.01em; }
+.answer em { font-style: normal; color: var(--accent); }
+.answer-sub { margin: 0 0 18px; color: var(--muted); max-width: 70ch; font-size: 15px; }
+.notice { background: var(--warn-bg); color: var(--warn-ink); padding: 10px 14px; border-radius: 6px; margin: 0 0 18px; max-width: 70ch; }
+.status { color: var(--muted); }
+
+table.sizes { border-collapse: collapse; margin: 0 0 22px; font-variant-numeric: tabular-nums; }
+table.sizes th { text-align: left; font-weight: 500; color: var(--muted); font-size: 13px; padding: 4px 18px 6px 0; border-bottom: 1px solid var(--line); }
+table.sizes td { padding: 6px 18px 6px 0; border-bottom: 1px solid var(--line); }
+table.sizes td.num, table.sizes th.num { text-align: right; }
+table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right: 8px; }
+
+.toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 14px; }
+.sheets { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 18px; }
+.sheet-card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px; }
+.sheet-card svg { width: 100%; height: auto; max-height: 540px; display: block; }
+.sheet-card h3 { font-size: 15px; font-weight: 600; margin: 0 0 6px; }
+.sheet-card h3 span { font-weight: 400; color: var(--muted); }
+.sheet-card p { margin: 8px 0 0; font-size: 13.5px; color: var(--muted); }
+.sheet-card p b { color: var(--ink); font-weight: 500; }
+.empty { color: var(--muted); max-width: 60ch; }
+@media (prefers-reduced-motion: no-preference) { .btn, .seg button { transition: background .12s, border-color .12s; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>Sheet nesting calculator</h1>
+    <p>Enter your stock sheet and the circles you need. It works out how many sheets to buy, how much of each sheet gets used, and lays the circles out for you.</p>
+  </div>
+  <div class="seg" role="group" aria-label="Units">
+    <button type="button" data-unit="in" aria-pressed="true">inches</button>
+    <button type="button" data-unit="mm" aria-pressed="false">millimetres</button>
+  </div>
+</header>
+
+<main class="layout">
+  <aside class="controls" aria-label="Inputs">
+    <section class="group">
+      <h2>Stock sheet</h2>
+      <label class="field"><span>Size</span><select id="preset"></select></label>
+      <div class="field-row">
+        <label class="field"><span>Width</span><div class="unit-in"><input id="w" type="number" min="0" step="any"><span class="u"></span></div></label>
+        <label class="field"><span>Height</span><div class="unit-in"><input id="h" type="number" min="0" step="any"><span class="u"></span></div></label>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2>Spacing</h2>
+      <div class="slider">
+        <div class="lbl"><label for="gap">Between circles</label><strong id="gapV"></strong></div>
+        <div class="track"><input type="range" id="gap"><div class="unit-in"><input type="number" id="gapN" min="0" step="any"><span class="u"></span></div></div>
+      </div>
+      <div class="slider">
+        <div class="lbl"><label for="margin">From the sheet edge</label><strong id="marginV"></strong></div>
+        <div class="track"><input type="range" id="margin"><div class="unit-in"><input type="number" id="marginN" min="0" step="any"><span class="u"></span></div></div>
+      </div>
+    </section>
+
+    <section class="group">
+      <h2>Circles to cut</h2>
+      <div class="circ-head"><span></span><span>Diameter</span><span>Quantity</span><span></span></div>
+      <div id="rows"></div>
+      <button type="button" class="btn" id="add">Add another size</button>
+      <p class="hint">Largest circles are placed first. Sheets that come out identical are drawn once.</p>
+    </section>
+  </aside>
+
+  <section class="results" id="results" aria-live="polite"></section>
+</main>
+
+<script>
+// Circle nesting engine: greedy largest-first placement with hex/square grid seeding
+// and tangent-candidate bottom-left heuristics. Coordinates: origin bottom-left.
+function nestCircles(opts) {
+  const W = opts.W, H = opts.H, margin = Math.max(0, opts.margin || 0), gap = Math.max(0, opts.gap || 0);
+  const sizes = opts.sizes; // [{d, q}]
+  const maxSheets = opts.maxSheets || 2000;
+  const eps = 1e-6 * Math.max(W, H, 1);
+  const uW = W - 2 * margin, uH = H - 2 * margin;
+  const nTypes = sizes.length;
+
+  const tooBig = [];
+  sizes.forEach((s, t) => { if (s.d > uW + eps || s.d > uH + eps) tooBig.push(t); });
+  if (tooBig.length) return { error: 'too-big', tooBig };
+
+  const items = [];
+  sizes.forEach((s, t) => { for (let i = 0; i < s.q; i++) items.push({ r: s.d / 2, t }); });
+  if (!items.length) return { error: 'empty' };
+  items.sort((a, b) => (b.r - a.r) || (a.t - b.t));
+  const radii = [...new Set(items.map(i => i.r))].sort((a, b) => b - a);
+  const rmax = radii[0];
+  const cs = 2 * rmax + gap;
+  const KEY = 100003;
+
+  function Grid() {
+    const map = new Map();
+    return {
+      add(c) {
+        const k = Math.floor(c.x / cs) * KEY + Math.floor(c.y / cs);
+        let a = map.get(k); if (!a) { a = []; map.set(k, a); } a.push(c);
+      },
+      each(x, y, range, fn) {
+        const i0 = Math.floor(x / cs), j0 = Math.floor(y / cs);
+        for (let i = i0 - range; i <= i0 + range; i++) for (let j = j0 - range; j <= j0 + range; j++) {
+          const a = map.get(i * KEY + j); if (!a) continue;
+          for (let q = 0; q < a.length; q++) if (fn(a[q])) return true;
+        }
+        return false;
+      }
+    };
+  }
+
+  function nAlong(len, step) { if (len < -eps) return 0; return Math.floor(Math.max(0, len) / step + 1e-9) + 1; }
+
+  function gridPositions(kind, r) {
+    const p = 2 * r + gap, s = p * Math.sqrt(3) / 2;
+    const x0 = margin + r, y0 = margin + r, xr = W - margin - r, yr = H - margin - r;
+    if (kind === 'sq') {
+      const nx = nAlong(xr - x0, p), ny = nAlong(yr - y0, p), out = [];
+      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) out.push([x0 + i * p, y0 + j * p]);
+      return out;
+    }
+    if (kind === 'hexr') {
+      const ny = nAlong(yr - y0, s);
+      const build = (par) => { const o = []; for (let j = 0; j < ny; j++) { const off = (j % 2 === par) ? p / 2 : 0; const nx = nAlong(xr - x0 - off, p); for (let i = 0; i < nx; i++) o.push([x0 + off + i * p, y0 + j * s]); } return o; };
+      const a = build(1), b = build(0); return a.length >= b.length ? a : b;
+    }
+    const nx = nAlong(xr - x0, s);
+    const build = (par) => { const o = []; for (let i = 0; i < nx; i++) { const off = (i % 2 === par) ? p / 2 : 0; const ny = nAlong(yr - y0 - off, p); for (let j = 0; j < ny; j++) o.push([x0 + i * s, y0 + off + j * p]); } return o; };
+    const a = build(1), b = build(0); return a.length >= b.length ? a : b;
+  }
+
+  const cmpBL = (a, b) => (Math.abs(a[1] - b[1]) > eps ? a[1] - b[1] : a[0] - b[0]);
+  const cmpLB = (a, b) => (Math.abs(a[0] - b[0]) > eps ? a[0] - b[0] : a[1] - b[1]);
+  const cmpCorner = (a, b) => { const da = a[0] * a[0] + a[1] * a[1], db = b[0] * b[0] + b[1] * b[1]; return Math.abs(da - db) > eps ? da - db : a[1] - b[1]; };
+
+  const STRATS = [
+    { name: 'Hex rows', grid: 'hexr', cmp: cmpBL },
+    { name: 'Hex columns', grid: 'hexc', cmp: cmpLB },
+    { name: 'Square grid', grid: 'sq', cmp: cmpBL },
+    { name: 'Bottom-left fill', grid: null, cmp: cmpBL },
+    { name: 'Left-bottom fill', grid: null, cmp: cmpLB },
+    { name: 'Corner fill', grid: null, cmp: cmpCorner },
+  ];
+
+  function packSheet(list, strat) {
+    const placed = [], leftover = [];
+    const grid = Grid();
+    const cand = new Map(radii.map(r => [r, []]));
+    const failed = new Set();
+    const toProcess = new Map(radii.map(r => [r, 0]));
+    for (const it of list) toProcess.set(it.r, toProcess.get(it.r) + 1);
+    const consumed = new Array(nTypes).fill(0);
+    let area = 0, maxX = 0, maxY = 0;
+
+    function corners(rr) {
+      return [[margin + rr, margin + rr], [W - margin - rr, margin + rr], [margin + rr, H - margin - rr], [W - margin - rr, H - margin - rr]];
+    }
+    function valid(x, y, r) {
+      if (x - r < margin - eps || x + r > W - margin + eps || y - r < margin - eps || y + r > H - margin + eps) return false;
+      return !grid.each(x, y, 1, (n) => { const dx = n.x - x, dy = n.y - y, m = n.r + r + gap - eps; return dx * dx + dy * dy < m * m; });
+    }
+    function addCands(c, rr, out) {
+      const R = c.r + rr + gap;
+      const xs = [margin + rr, W - margin - rr];
+      for (let k = 0; k < 2; k++) { const X = xs[k], dx = X - c.x; if (Math.abs(dx) <= R) { const dy = Math.sqrt(Math.max(0, R * R - dx * dx)); out.push([X, c.y + dy], [X, c.y - dy]); } }
+      const ys = [margin + rr, H - margin - rr];
+      for (let k = 0; k < 2; k++) { const Y = ys[k], dy = Y - c.y; if (Math.abs(dy) <= R) { const dx = Math.sqrt(Math.max(0, R * R - dy * dy)); out.push([c.x + dx, Y], [c.x - dx, Y]); } }
+      grid.each(c.x, c.y, 2, (n) => {
+        const R2 = n.r + rr + gap;
+        const dx = n.x - c.x, dy = n.y - c.y, d = Math.hypot(dx, dy);
+        if (d < eps || d > R + R2 + eps || d < Math.abs(R - R2) - eps) return false;
+        const a = (R * R - R2 * R2 + d * d) / (2 * d), h = Math.sqrt(Math.max(0, R * R - a * a));
+        const px = c.x + a * dx / d, py = c.y + a * dy / d;
+        out.push([px + h * dy / d, py - h * dx / d], [px - h * dy / d, py + h * dx / d]);
+        return false;
+      });
+    }
+    function place(x, y, r, t, gen) {
+      const c = { x, y, r, t };
+      if (gen) for (const rr of radii) if (!failed.has(rr) && toProcess.get(rr) > 0) addCands(c, rr, cand.get(rr));
+      grid.add(c); placed.push(c);
+      area += Math.PI * r * r; consumed[t]++;
+      if (x + r > maxX) maxX = x + r; if (y + r > maxY) maxY = y + r;
+    }
+    function findBest(r, cmp) {
+      const lst = cand.get(r); let best = null, k = 0;
+      for (let i = 0; i < lst.length; i++) { const p = lst[i]; if (valid(p[0], p[1], r)) { lst[k++] = p; if (!best || cmp(p, best) < 0) best = p; } }
+      lst.length = k; return best;
+    }
+
+    let queue = list;
+    if (strat.grid) {
+      const r0 = queue[0].r; let n0 = 0; while (n0 < queue.length && queue[n0].r === r0) n0++;
+      const pos = gridPositions(strat.grid, r0);
+      const take = Math.min(n0, pos.length), rest = queue.length - take;
+      for (let i = 0; i < take; i++) { toProcess.set(r0, toProcess.get(r0) - 1); place(pos[i][0], pos[i][1], r0, queue[i].t, rest > 0); }
+      queue = queue.slice(take);
+    }
+    for (const rr of radii) if (toProcess.get(rr) > 0) cand.get(rr).push(...corners(rr));
+
+    for (let idx = 0; idx < queue.length; idx++) {
+      const it = queue[idx]; toProcess.set(it.r, toProcess.get(it.r) - 1);
+      if (failed.has(it.r)) { leftover.push(it); continue; }
+      const p = findBest(it.r, strat.cmp);
+      if (!p) { failed.add(it.r); leftover.push(it); continue; }
+      place(p[0], p[1], it.r, it.t, true);
+    }
+    return { placed, leftover, area, consumed, maxX, maxY, strat: strat.name };
+  }
+
+  function better(res, best) {
+    if (!best) return true;
+    if (res.leftover.length === 0 && best.leftover.length === 0) return res.maxX * res.maxY < best.maxX * best.maxY - eps;
+    if (res.area > best.area + eps) return true;
+    if (Math.abs(res.area - best.area) <= eps) return res.placed.length > best.placed.length;
+    return false;
+  }
+  function countByType(list) { const c = new Array(nTypes).fill(0); for (const it of list) c[it.t]++; return c; }
+  function removeCounts(list, consumed, m) {
+    const skip = consumed.map(c => c * m), out = [];
+    for (const it of list) { if (skip[it.t] > 0) { skip[it.t]--; } else out.push(it); }
+    return out;
+  }
+
+  const sheets = [];
+  let remaining = items, totalSheets = 0, iterations = 0, error = null, capped = false;
+  while (remaining.length && totalSheets < maxSheets) {
+    if (++iterations > 600) { capped = true; break; }
+    const results = []; let best = null;
+    const first = packSheet(remaining, STRATS[0]); results.push(first); best = first;
+    const strats = first.placed.length > 2000 ? [STRATS[3]] : STRATS.slice(1);
+    for (const s of strats) { const res = packSheet(remaining, s); results.push(res); if (better(res, best)) best = res; }
+    if (!best || best.placed.length === 0) { error = 'stuck'; break; }
+    remaining = best.leftover;
+    let reps = 1;
+    if (remaining.length) {
+      const rem = countByType(remaining);
+      let m = 0;
+      const ok = (mm) => { for (const res of results) for (let t = 0; t < nTypes; t++) { if (rem[t] - mm * best.consumed[t] < res.consumed[t]) return false; } return true; };
+      while (m < maxSheets && ok(m)) m++;
+      if (m > 0) { remaining = removeCounts(remaining, best.consumed, m); reps += m; }
+    }
+    if (totalSheets + reps > maxSheets) { reps = maxSheets - totalSheets; capped = true; }
+    sheets.push({ placed: best.placed, reps, area: best.area, consumed: best.consumed, maxX: best.maxX, maxY: best.maxY, strat: best.strat });
+    totalSheets += reps;
+    if (capped) break;
+  }
+  if (remaining.length && !error) capped = true;
+
+  const maxPerSheet = sizes.map(s => { const r = s.d / 2; return Math.max(gridPositions('sq', r).length, gridPositions('hexr', r).length, gridPositions('hexc', r).length); });
+  const totalArea = items.reduce((a, it) => a + Math.PI * it.r * it.r, 0);
+  return { sheets, totalSheets, totalArea, maxPerSheet, error, capped, unplaced: remaining.length };
+}
+
+
+// ---------- presets, state ----------
+// ---------- Stock materials: edit this list to add your own ----------
+// Give each one a name, width, height and the unit it is measured in.
+// They appear at the top of the dropdown and convert when you switch units.
+const MATERIALS = [
+  { name: 'Fade Not Poly', w: 24, h: 24, unit: 'in' },
+  { name: 'Brightview', w: 24, h: 72, unit: 'in' },
+];
+// Generic sheet sizes listed after the named materials.
+const GENERIC = {
+  in: [
+    { label: '4 ft × 8 ft (48 × 96 in)', w: 48, h: 96 },
+    { label: '4 ft × 10 ft (48 × 120 in)', w: 48, h: 120 },
+    { label: '5 ft × 10 ft (60 × 120 in)', w: 60, h: 120 },
+    { label: '4 ft × 4 ft (48 × 48 in)', w: 48, h: 48 },
+    { label: '3 ft × 3 ft (36 × 36 in)', w: 36, h: 36 },
+    { label: '2 ft × 4 ft (24 × 48 in)', w: 24, h: 48 },
+    { label: '24 × 24 in', w: 24, h: 24 },
+    { label: '12 × 24 in', w: 12, h: 24 },
+    { label: '12 × 12 in', w: 12, h: 12 },
+  ],
+  mm: [
+    { label: '1000 × 2000 mm', w: 1000, h: 2000 },
+    { label: '1250 × 2500 mm', w: 1250, h: 2500 },
+    { label: '1500 × 3000 mm', w: 1500, h: 3000 },
+    { label: '1220 × 2440 mm', w: 1220, h: 2440 },
+    { label: '1000 × 1000 mm', w: 1000, h: 1000 },
+    { label: '600 × 1200 mm', w: 600, h: 1200 },
+    { label: '600 × 600 mm', w: 600, h: 600 },
+    { label: '300 × 600 mm', w: 300, h: 600 },
+    { label: '300 × 300 mm', w: 300, h: 300 },
+  ],
+};
+function roundTo(v, unit) { return unit === 'mm' ? Math.round(v * 10) / 10 : Math.round(v * 1000) / 1000; }
+function presetsFor(unit) {
+  const mats = MATERIALS.map(m => {
+    const f = m.unit === unit ? 1 : (unit === 'mm' ? 25.4 : 1 / 25.4);
+    const w = roundTo(m.w * f, unit), h = roundTo(m.h * f, unit);
+    const label = m.unit === unit ? `${m.name} ${m.w} × ${m.h} ${m.unit}` : `${m.name} ${m.w} × ${m.h} ${m.unit} (${w} × ${h} ${unit})`;
+    return { label, w, h };
+  });
+  return mats.concat(GENERIC[unit]);
+}
+const SLIDER = {
+  in: { gapMax: 2, marginMax: 4, step: 0.0625 },
+  mm: { gapMax: 50, marginMax: 100, step: 0.5 },
+};
+const COLORS = ['#2f6fed', '#17a398', '#e4b61a', '#c94c8a', '#7a4ddb', '#4caf50', '#ef4f3f', '#1f9bd6', '#b86f2d', '#5d6b7a'];
+const MAX_CIRCLES = 20000;
+const MAX_SHEETS = 2000;
+const MAX_DRAWN = 40;
+
+const state = {
+  unit: 'in',
+  preset: 0,
+  w: 24, h: 24,
+  gap: 0.25,
+  margin: 0.5,
+  circles: [{ d: 6, q: 12 }, { d: 3, q: 24 }],
+};
+
+const $ = (id) => document.getElementById(id);
+const els = {
+  preset: $('preset'), w: $('w'), h: $('h'),
+  gap: $('gap'), gapN: $('gapN'), gapV: $('gapV'),
+  margin: $('margin'), marginN: $('marginN'), marginV: $('marginV'),
+  rows: $('rows'), add: $('add'), results: $('results'),
+};
+
+function fmt(v) {
+  if (!isFinite(v)) return '–';
+  const n = state.unit === 'mm' ? Math.round(v * 10) / 10 : Math.round(v * 1000) / 1000;
+  return n.toLocaleString('en-US', { maximumFractionDigits: 3 });
+}
+const pct = (v) => Math.round(v * 100) + '%';
+const count = (n) => n.toLocaleString('en-US');
+const unitName = () => state.unit;
+const dia = (d) => 'Ø' + fmt(d) + ' ' + unitName();
+
+// ---------- controls ----------
+function buildPresetOptions() {
+  els.preset.innerHTML = '';
+  presetsFor(state.unit).forEach((p, i) => { const o = document.createElement('option'); o.value = i; o.textContent = p.label; els.preset.appendChild(o); });
+  const c = document.createElement('option'); c.value = 'custom'; c.textContent = 'Custom size'; els.preset.appendChild(c);
+  els.preset.value = state.preset;
+}
+function syncUnitsUI() {
+  document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.unit === state.unit)));
+  document.querySelectorAll('.unit-in .u').forEach(s => s.textContent = state.unit);
+  const s = SLIDER[state.unit];
+  els.gap.max = s.gapMax; els.gap.step = s.step; els.margin.max = s.marginMax; els.margin.step = s.step;
+  els.gapN.step = s.step; els.marginN.step = s.step;
+}
+function syncInputs() {
+  els.w.value = fmtInput(state.w); els.h.value = fmtInput(state.h);
+  els.gap.value = state.gap; els.gapN.value = fmtInput(state.gap); els.gapV.textContent = fmt(state.gap) + ' ' + unitName();
+  els.margin.value = state.margin; els.marginN.value = fmtInput(state.margin); els.marginV.textContent = fmt(state.margin) + ' ' + unitName();
+}
+function fmtInput(v) { return String(state.unit === 'mm' ? Math.round(v * 100) / 100 : Math.round(v * 10000) / 10000); }
+
+function renderRows() {
+  els.rows.innerHTML = '';
+  state.circles.forEach((c, i) => {
+    const row = document.createElement('div'); row.className = 'circ-row';
+    row.innerHTML = `
+      <span class="swatch" style="background:${COLORS[i % COLORS.length]}"></span>
+      <div class="unit-in"><input type="number" min="0" step="any" aria-label="Diameter of size ${i + 1}" data-i="${i}" data-k="d" value="${fmtInput(c.d)}"><span class="u">${unitName()}</span></div>
+      <input type="number" min="0" step="1" aria-label="Quantity of size ${i + 1}" data-i="${i}" data-k="q" value="${c.q}">
+      <button type="button" class="x" data-del="${i}" aria-label="Remove size ${i + 1}" title="Remove">×</button>`;
+    els.rows.appendChild(row);
+  });
+}
+
+els.rows.addEventListener('input', (e) => {
+  const t = e.target; if (!t.dataset.k) return;
+  const i = +t.dataset.i, v = parseFloat(t.value);
+  state.circles[i][t.dataset.k] = t.dataset.k === 'q' ? Math.max(0, Math.floor(v || 0)) : (v > 0 ? v : 0);
+  schedule();
+});
+els.rows.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-del]'); if (!b) return;
+  state.circles.splice(+b.dataset.del, 1); renderRows(); schedule();
+});
+els.add.addEventListener('click', () => {
+  const last = state.circles[state.circles.length - 1];
+  const d = last ? Math.max(last.d / 2, state.unit === 'mm' ? 10 : 0.5) : (state.unit === 'mm' ? 100 : 4);
+  state.circles.push({ d: Math.round(d * 100) / 100, q: 10 });
+  renderRows(); schedule();
+  const inputs = els.rows.querySelectorAll('input[data-k="d"]'); inputs[inputs.length - 1].focus();
+});
+
+els.preset.addEventListener('change', () => {
+  if (els.preset.value === 'custom') { state.preset = 'custom'; els.w.focus(); els.w.select(); return; }
+  state.preset = +els.preset.value;
+  const p = presetsFor(state.unit)[state.preset]; state.w = p.w; state.h = p.h; syncInputs(); schedule();
+});
+[els.w, els.h].forEach(inp => inp.addEventListener('input', () => {
+  state.w = parseFloat(els.w.value) || 0; state.h = parseFloat(els.h.value) || 0;
+  const match = presetsFor(state.unit).findIndex(p => p.w === state.w && p.h === state.h);
+  state.preset = match >= 0 ? match : 'custom'; els.preset.value = state.preset; schedule();
+}));
+function bindSlider(range, num, key) {
+  range.addEventListener('input', () => { state[key] = parseFloat(range.value); num.value = fmtInput(state[key]); $(key + 'V').textContent = fmt(state[key]) + ' ' + unitName(); schedule(); });
+  num.addEventListener('input', () => { const v = parseFloat(num.value); state[key] = v >= 0 ? v : 0; range.value = state[key]; $(key + 'V').textContent = fmt(state[key]) + ' ' + unitName(); schedule(); });
+}
+bindSlider(els.gap, els.gapN, 'gap');
+bindSlider(els.margin, els.marginN, 'margin');
+
+document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+  const to = b.dataset.unit; if (to === state.unit) return;
+  const f = to === 'mm' ? 25.4 : 1 / 25.4;
+  state.unit = to;
+  state.w *= f; state.h *= f; state.gap *= f; state.margin *= f;
+  state.circles.forEach(c => c.d *= f);
+  const round = (v) => to === 'mm' ? Math.round(v * 10) / 10 : Math.round(v * 1000) / 1000;
+  state.w = round(state.w); state.h = round(state.h); state.gap = round(state.gap); state.margin = round(state.margin);
+  state.circles.forEach(c => c.d = round(c.d));
+  const match = presetsFor(to).findIndex(p => p.w === state.w && p.h === state.h);
+  state.preset = match >= 0 ? match : 'custom';
+  buildPresetOptions(); syncUnitsUI(); syncInputs(); renderRows(); schedule();
+}));
+
+// ---------- calculation ----------
+let timer = null, token = 0;
+function schedule() {
+  clearTimeout(timer);
+  timer = setTimeout(() => {
+    const my = ++token;
+    els.results.innerHTML = '<p class="status">Calculating…</p>';
+    setTimeout(() => { if (my === token) calculate(); }, 20);
+  }, 220);
+}
+
+function calculate() {
+  const W = state.w, H = state.h, margin = state.margin, gap = state.gap;
+  const sizes = state.circles.map((c, i) => ({ d: c.d, q: c.q, i })).filter(c => c.d > 0 && c.q > 0);
+  if (!(W > 0 && H > 0)) { els.results.innerHTML = '<p class="empty">Enter a sheet width and height to start.</p>'; return; }
+  if (!sizes.length) { els.results.innerHTML = '<p class="empty">Add at least one circle size with a quantity above zero.</p>'; return; }
+  const total = sizes.reduce((a, s) => a + s.q, 0);
+  if (total > MAX_CIRCLES) { els.results.innerHTML = `<p class="notice">That’s ${count(total)} circles. The calculator handles up to ${count(MAX_CIRCLES)} at a time. Reduce the quantities, or run them in batches.</p>`; return; }
+
+  const res = nestCircles({ W, H, margin, gap, sizes, maxSheets: MAX_SHEETS });
+  if (res.error === 'too-big') {
+    const names = res.tooBig.map(t => dia(sizes[t].d)).join(', ');
+    const inner = `${fmt(W - 2 * margin)} × ${fmt(H - 2 * margin)} ${unitName()}`;
+    els.results.innerHTML = `<p class="notice">${names} won’t fit on this sheet. With a ${fmt(margin)} ${unitName()} edge margin the usable area is ${inner}. Use a larger sheet, a smaller circle, or a smaller margin.</p>`;
+    return;
+  }
+  if (res.error) { els.results.innerHTML = `<p class="notice">Couldn’t place these circles. Check the sizes and spacing.</p>`; return; }
+  renderResults(res, sizes, W, H, margin, gap);
+}
+
+function renderResults(res, sizes, W, H, margin, gap) {
+  const n = res.totalSheets;
+  const sheetArea = W * H;
+  const overall = res.totalArea / (n * sheetArea);
+  const last = res.sheets[res.sheets.length - 1];
+  const lastUtil = last.area / sheetArea;
+  const placedCount = res.sheets.reduce((a, s) => a + s.placed.length * s.reps, 0);
+  const sheetName = `${fmt(W)} × ${fmt(H)} ${unitName()}`;
+
+  let html = '';
+  html += `<h2 class="answer"><em>${count(n)} ${n === 1 ? 'sheet' : 'sheets'}</em> of ${sheetName}</h2>`;
+  let sub = `${count(placedCount)} circles, using ${pct(overall)} of the material overall.`;
+  if (n > 1 || res.sheets.length > 1) sub += ` The last sheet is ${pct(lastUtil)} used, with its layout reaching ${fmt(last.maxX)} across and ${fmt(last.maxY)} up the sheet.`;
+  else sub += ` The layout reaches ${fmt(last.maxX)} across and ${fmt(last.maxY)} up the sheet, so ${fmt(W - last.maxX)} ${unitName()} stays clear on the right and ${fmt(H - last.maxY)} ${unitName()} above.`;
+  html += `<p class="answer-sub">${sub}</p>`;
+  if (res.capped) html += `<p class="notice">Stopped at ${count(MAX_SHEETS)} sheets with ${count(res.unplaced)} circles still to place. Reduce the quantities to get a full count.</p>`;
+
+  html += '<table class="sizes"><thead><tr><th>Size</th><th class="num">Needed</th><th class="num">Fit on one empty sheet</th><th class="num">Sheets if cut alone</th></tr></thead><tbody>';
+  sizes.forEach((s, t) => {
+    const fit = res.maxPerSheet[t];
+    html += `<tr><td><span class="swatch" style="background:${COLORS[s.i % COLORS.length]}"></span>${dia(s.d)}</td><td class="num">${count(s.q)}</td><td class="num">${count(fit)}</td><td class="num">${count(Math.ceil(s.q / fit))}</td></tr>`;
+  });
+  html += '</tbody></table>';
+
+  html += `<div class="toolbar"><button type="button" class="btn" id="copy">Copy summary</button><span class="status" id="copied"></span></div>`;
+
+  html += '<div class="sheets">';
+  let idx = 1;
+  res.sheets.slice(0, MAX_DRAWN).forEach((sh) => {
+    const title = sh.reps > 1 ? `Sheets ${count(idx)}–${count(idx + sh.reps - 1)} <span>(identical)</span>` : `Sheet ${count(idx)}`;
+    const parts = sizes.map((s, t) => sh.consumed[t] ? `${count(sh.consumed[t])} × ${dia(s.d)}` : null).filter(Boolean).join(', ');
+    const util = sh.area / sheetArea;
+    html += `<div class="sheet-card"><h3>${title}</h3>${sheetSVG(sh, sizes, W, H, margin)}<p><b>${pct(util)} used.</b> ${parts}. Layout reaches ${fmt(sh.maxX)} × ${fmt(sh.maxY)} ${unitName()}.</p></div>`;
+    idx += sh.reps;
+  });
+  html += '</div>';
+  if (res.sheets.length > MAX_DRAWN) html += `<p class="hint">Only the first ${MAX_DRAWN} distinct layouts are drawn.</p>`;
+  els.results.innerHTML = html;
+
+  $('copy').addEventListener('click', async () => {
+    const lines = [`${count(n)} ${n === 1 ? 'sheet' : 'sheets'} of ${sheetName}`, `Spacing ${fmt(gap)} ${unitName()} between circles, ${fmt(margin)} ${unitName()} from the edge`, `${count(placedCount)} circles, ${pct(overall)} of material used overall`, ''];
+    let i = 1;
+    res.sheets.forEach((sh) => {
+      const label = sh.reps > 1 ? `Sheets ${i}–${i + sh.reps - 1} (identical)` : `Sheet ${i}`;
+      const parts = sizes.map((s, t) => sh.consumed[t] ? `${sh.consumed[t]} × ${dia(s.d)}` : null).filter(Boolean).join(', ');
+      lines.push(`${label}: ${parts} — ${pct(sh.area / sheetArea)} used, layout ${fmt(sh.maxX)} × ${fmt(sh.maxY)} ${unitName()}`);
+      i += sh.reps;
+    });
+    try { await navigator.clipboard.writeText(lines.join('\n')); $('copied').textContent = 'Copied.'; }
+    catch { $('copied').textContent = 'Copy failed — select the text instead.'; }
+    setTimeout(() => { const c = $('copied'); if (c) c.textContent = ''; }, 2500);
+  });
+}
+
+function sheetSVG(sh, sizes, W, H, margin) {
+  let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Layout of ${sh.placed.length} circles on the sheet">`;
+  s += `<rect x="0" y="0" width="${W}" height="${H}" fill="var(--sheet)" stroke="var(--sheet-edge)" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
+  if (margin > 0) s += `<rect x="${margin}" y="${margin}" width="${W - 2 * margin}" height="${H - 2 * margin}" fill="none" stroke="var(--margin-line)" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>`;
+  for (const c of sh.placed) {
+    const col = COLORS[sizes[c.t].i % COLORS.length];
+    s += `<circle cx="${c.x.toFixed(4)}" cy="${(H - c.y).toFixed(4)}" r="${c.r}" fill="${col}" fill-opacity="0.82" stroke="${col}" stroke-width="1" vector-effect="non-scaling-stroke"><title>${dia(sizes[c.t].d)} at ${fmt(c.x)}, ${fmt(c.y)} from the bottom-left corner</title></circle>`;
+  }
+  s += '</svg>';
+  return s;
+}
+
+// ---------- init ----------
+buildPresetOptions(); syncUnitsUI(); syncInputs(); renderRows(); calculate();
+</script>
+</body>
+</html>
