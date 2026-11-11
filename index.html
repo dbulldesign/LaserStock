@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Sheet nesting calculator</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="icon" href="icon-192.png" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f05a0f">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@600&display=swap" rel="stylesheet">
@@ -90,6 +95,7 @@ button, input, select { font: inherit; color: inherit; }
   font-family: "Barlow Semi Condensed", "Barlow", sans-serif;
   font-weight: 600; font-size: 26px; line-height: 1.1; margin: 0; letter-spacing: -0.01em;
 }
+.top h1 .logo { width: 28px; height: 28px; margin-right: 10px; vertical-align: -6px; }
 .top h1 .ver { font-family: "Barlow", sans-serif; font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 8px; letter-spacing: 0; vertical-align: middle; }
 .update { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 24px; background: var(--accent); color: var(--accent-ink); font-weight: 500; }
 .update[hidden] { display: none; }
@@ -171,7 +177,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 </div>
 <header class="top">
   <div>
-    <h1>Sheet nesting calculator<span class="ver" id="ver"></span></h1>
+    <h1><img class="logo" src="icon.svg" alt="" width="28" height="28">Sheet nesting calculator<span class="ver" id="ver"></span></h1>
     <p>Enter your stock sheet and the circles you need. It works out how many sheets to buy, how much of each sheet gets used, and lays the circles out for you.</p>
   </div>
   <div class="seg" role="group" aria-label="Units">
@@ -219,7 +225,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows and
