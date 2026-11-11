@@ -4,9 +4,11 @@ Sheet nesting calculator for laser cutting circles. Enter a stock sheet and the
 circles you need; it works out how many sheets to use and order, and lays the
 circles out in even grids.
 
-Current version: **1.16.0**
+Current version: **1.17.0**
 
 ## Versions
+
+- **1.17.0** — Jobs list shows each job's circles, laser sheets and full sheets per material with a total. Jobs sharing a name are flagged with Combine them; new duplicates are blocked and renaming onto another job combines them.
 
 - **1.16.0** — Planned job picker and name suggestions; a name matching a planned job (ignoring case and spacing) offers to open it or add what's open to it, and Add to jobs merges into the existing job instead of duplicating it.
 

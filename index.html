@@ -217,8 +217,15 @@ table.buy th { color: var(--muted); font-weight: 500; font-size: 13px; }
 table.buy td.num, table.buy th.num { text-align: right; font-variant-numeric: tabular-nums; }
 table.buy td.order { font-weight: 600; color: var(--accent); }
 .job-card { display: grid; grid-template-columns: 1fr auto; gap: 4px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 10px 14px; margin: 0 0 10px; }
+.job-card.dup { border-color: var(--warn-ink); }
+.dupnote { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; max-width: none; }
+table.jobparts { grid-column: 1 / -1; width: 100%; border-collapse: collapse; font-size: 13.5px; margin-top: 6px; }
+table.jobparts th, table.jobparts td { text-align: left; padding: 5px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+table.jobparts th { color: var(--muted); font-weight: 500; font-size: 12.5px; border-top: 0; }
+table.jobparts .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.jobparts tr.total td { font-weight: 600; }
 .job-card h4 { margin: 0; font-size: 15px; } .job-card p { margin: 0; font-size: 13.5px; color: var(--muted); }
-.job-card .acts { grid-row: 1 / span 2; grid-column: 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.job-card .acts { grid-row: 1; grid-column: 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 @media (max-width: 600px) { .job-card { grid-template-columns: 1fr; } .job-card .acts { grid-row: auto; grid-column: 1; justify-content: flex-start; } }
 #keyMsg { white-space: pre-line; }
 .syncbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 8px 18px; font-size: 13.5px; background: var(--surface); border-bottom: 1px solid var(--line); color: var(--muted); }
@@ -415,7 +422,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.16.0';
+const APP_VERSION = '1.17.0';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows at an
@@ -989,14 +996,17 @@ $('parts').addEventListener('click', (e) => {
 
 // Lay out one part on its own (for the job summary, planned jobs and marking cut).
 const partCache = new Map();
-function computePart(p) {
-  const gap = sheetTo(state.gap, p.unit), margin = sheetTo(state.margin, p.unit);
-  const key = JSON.stringify([p.w, p.h, p.unit, p.circles, gap, margin, state.layout]);
+// ctx = spacing and layout to use (a saved job's own settings); defaults to what's on screen.
+function computePart(p, ctx) {
+  ctx = ctx || { unit: state.unit, gap: state.gap, margin: state.margin, layout: state.layout };
+  const cv = (v) => (ctx.unit === p.unit ? v : p.unit === 'mm' ? v * 25.4 : v / 25.4);
+  const gap = cv(ctx.gap), margin = cv(ctx.margin), layout = ctx.layout;
+  const key = JSON.stringify([p.w, p.h, p.unit, p.circles, gap, margin, layout]);
   let out = partCache.get(key);
   if (!out) {
     const conv = (c) => (c.u === p.unit ? c.d : c.u === 'mm' ? c.d / 25.4 : c.d * 25.4);
     const sizes = p.circles.map((c, i) => ({ d: conv(c), q: c.q, i, label: diaOf(c) })).filter(c => c.d > 0 && c.q > 0);
-    const res = sizes.length && p.w > 0 && p.h > 0 ? nestCircles({ W: p.w, H: p.h, margin, gap, sizes, maxSheets: MAX_SHEETS, layout: state.layout }) : null;
+    const res = sizes.length && p.w > 0 && p.h > 0 ? nestCircles({ W: p.w, H: p.h, margin, gap, sizes, maxSheets: MAX_SHEETS, layout }) : null;
     out = { sizes, res: res && !res.error ? res : null, error: !sizes.length ? 'empty' : res && res.error };
     if (partCache.size > 200) partCache.clear();
     partCache.set(key, out);
@@ -1302,7 +1312,7 @@ async function saveJob() {
 }
 
 // Save the current job, with every material in it, to the planned list (or update the open one).
-function addToJobs(asNew) {
+function addToJobs(asNew, dropId) {
   const parts = allParts(), comp = parts.map(computePart);
   const tracked = comp.map((c, i) => ({ c, p: parts[i] })).filter(x => x.c.m && x.c.n);
   if (!tracked.length) { alert('Pick a material from the Size list first, so the job knows which stock it uses.'); return; }
@@ -1315,13 +1325,20 @@ function addToJobs(asNew) {
     state.name = name; $('jobName').value = name;
   }
   // Same name as another planned job: add what is open to that job rather than making a twin.
-  const same = findJobByName(name, state.jobId);
+  // (A new job must not reuse any planned job's name, including the one that's open.)
+  const same = findJobByName(name, asNew ? null : state.jobId);
   if (same) {
-    if (asNew) { if (!confirm(`There’s already a planned job called “${same.name}”. Add this as a separate job with the same name?`)) return; }
-    else {
-      if (!confirm(`“${same.name}” is already a planned job (${describeJob(same)}).
-
-Add the materials and circles you have open to it?`)) return;
+    if (asNew) {
+      // Two jobs with one name get mixed up, so a new job needs its own name.
+      const other = (prompt(`There’s already a planned job called “${same.name}”. Give this new job a different name:`, `${name} (2)`) || '').trim().slice(0, 120);
+      if (!other) return;
+      state.name = other; $('jobName').value = other;
+      return addToJobs(true);
+    } else {
+      const openJob = state.jobId && (inv.jobs || []).find(x => x.id === state.jobId);
+      if (!confirm(openJob
+        ? `“${same.name}” is already a planned job (${describeJob(same)}).\n\nCombine “${openJob.name}” into it? “${openJob.name}” will then be removed from the list.`
+        : `“${same.name}” is already a planned job (${describeJob(same)}).\n\nAdd the materials and circles you have open to it?`)) return;
       addCurrentTo(same); return;
     }
   }
@@ -1334,6 +1351,7 @@ Add the materials and circles you have open to it?`)) return;
     d.jobs = d.jobs || [];
     const k = d.jobs.findIndex(j => j.id === id);
     if (k >= 0) d.jobs[k] = clone(job); else d.jobs.push(clone(job));
+    if (dropId && dropId !== id) d.jobs = d.jobs.filter(j => j.id !== dropId);   // merged into this one
   })) return;
   state.jobId = id; renderJobPicker();
   flash(updating ? `Updated planned job “${name}”` : `Added “${name}” to planned jobs`);
@@ -1699,21 +1717,34 @@ function renderJobs() {
     <td class="num">${unitW(e.m, e.m.stock)}${e.m.cut && e.m.spare ? `<br><small class="hint">+ ${count(e.m.spare)} spare pieces</small>` : ''}</td>
     <td class="num ${e.buy ? 'order' : ''}">${e.buy ? unitW(e.m, e.buy) : 'Nothing'}</td></tr>`).join('')}</tbody></table>`
     : '<p class="empty">No planned jobs yet, so nothing to buy.</p>';
-  $('jobList').innerHTML = jobs.length ? jobs.map(j => {
-    const lines = j.parts.map(p => {
-      const m = inv.materials.find(x => x.id === p.matId);
-      return `<p>${esc(m ? m.name : `${p.material} (no longer in the list)`)} · <b>${count(p.sheets)} ${m && m.cut ? 'cut ' : ''}${p.sheets === 1 ? 'sheet' : 'sheets'}</b> · ${count(p.circles)} circles${p.summary ? ` (${esc(p.summary)})` : ''}</p>`;
+  const dups = dupNames();
+  const groups = [...dups].map(k => jobs.filter(j => normName(j.name) === k));
+  $('jobList').innerHTML = groups.map(g => `<div class="notice dupnote">${count(g.length)} planned jobs are called “${esc(g[0].name)}”, which gets confusing.
+      <button type="button" class="btn" data-combine="${esc(normName(g[0].name))}">Combine them into one job</button></div>`).join('')
+    + (jobs.length ? jobs.map(j => {
+    let laser = 0, full = 0, fullKnown = true;
+    const rows = j.parts.map(p => {
+      const m = inv.materials.find(x => x.id === p.matId), f = m ? Math.ceil(p.sheets / perOf(m)) : null;
+      laser += p.sheets; if (f == null) fullKnown = false; else full += f;
+      return `<tr><td>${esc(m ? m.name : `${p.material} (no longer in the list)`)}<br><small class="hint">${esc(p.summary)}</small></td><td class="num">${count(p.circles)}</td>
+        <td class="num">${count(p.sheets)}${m && m.cut ? '<small class="hint"> cut</small>' : ''}</td><td class="num"><b>${f == null ? '–' : count(f)}</b></td></tr>`;
     }).join('');
-    return `<div class="job-card"><h4>${esc(j.name)} <small class="hint">· added ${new Date(j.at).toLocaleDateString(undefined, { dateStyle: 'medium' })}</small></h4>
+    const total = j.parts.length > 1 ? `<tr class="total"><td>Total</td><td class="num">${count(j.parts.reduce((a, p) => a + p.circles, 0))}</td><td class="num">${count(laser)}</td><td class="num"><b>${fullKnown ? count(full) : '–'}</b></td></tr>` : '';
+    return `<div class="job-card${dups.has(normName(j.name)) ? ' dup' : ''}"><h4>${esc(j.name)} <small class="hint">· added ${new Date(j.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</small></h4>
       <div class="acts"><button type="button" class="btn" data-job-open="${esc(j.id)}">Open</button><button type="button" class="btn" data-job-cut="${esc(j.id)}">Mark as cut…</button><button type="button" class="btn" data-job-del="${esc(j.id)}">Remove</button></div>
-      <div>${lines}</div></div>`;
-  }).join('') : '<p class="empty">No planned jobs.</p>';
+      <table class="jobparts"><thead><tr><th>Material</th><th class="num">Circles</th><th class="num">Laser sheets</th><th class="num">Full sheets</th></tr></thead><tbody>${rows}${total}</tbody></table></div>`;
+  }).join('') : '<p class="empty">No planned jobs.</p>');
 }
 function updateJobsBadge() { const n = (inv.jobs || []).length, b = $('jobsBadge'); b.hidden = !n; b.textContent = n; }
 $('jobsBtn').addEventListener('click', () => { renderJobs(); jobsDlg.showModal(); refreshShared(false); });
 $('jobsClose').addEventListener('click', () => jobsDlg.close());
 $('jobList').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.combine) {
+    const g = (inv.jobs || []).filter(j => normName(j.name) === b.dataset.combine);
+    if (g.length > 1 && confirm(`Combine the ${g.length} jobs called “${g[0].name}” into one? Their materials and circles are added together (the same size on the same material adds up).`)) combineJobs(g);
+    renderJobs(); return;
+  }
   const id = b.dataset.jobOpen || b.dataset.jobCut || b.dataset.jobDel, j = (inv.jobs || []).find(x => x.id === id); if (!j) return;
   if (b.dataset.jobOpen) {
     if (openPlanned(j)) jobsDlg.close();
@@ -1741,7 +1772,38 @@ $('copyOrder').addEventListener('click', async () => {
 });
 
 // ---------- picking, opening and combining planned jobs ----------
-const sameName = (a, b) => a.trim().replace(/\s+/g, ' ').toLowerCase() === b.trim().replace(/\s+/g, ' ').toLowerCase();
+const normName = (a) => a.trim().replace(/\s+/g, ' ').toLowerCase();
+const sameName = (a, b) => normName(a) === normName(b);
+function dupNames() { const seen = new Map(); for (const j of inv.jobs || []) seen.set(normName(j.name), (seen.get(normName(j.name)) || 0) + 1); return new Set([...seen].filter(([, n]) => n > 1).map(([k]) => k)); }
+
+// Turn parts back into saved settings (keeps the job's spacing and layout).
+function settingsWithParts(st, parts) {
+  const out = clone(st), p0 = parts[0];
+  out.parts = parts.map(p => ({ material: (partMat(p) || {}).name || null, preset: p.preset, sheet: { width: p.w, height: p.h, unit: p.unit },
+    circles: p.circles.map(c => ({ diameter: c.d, unit: c.u, quantity: c.q, ...(c.name ? { name: c.name } : {}) })) }));
+  out.active = 0;
+  Object.assign(out, { material: out.parts[0].material, preset: p0.preset, sheet: { width: p0.w, height: p0.h }, circles: out.parts[0].circles });
+  return out;
+}
+const ctxOf = (st) => ({ unit: st.unit === 'mm' ? 'mm' : 'in', gap: (st.spacing || {}).betweenCircles ?? state.gap, margin: (st.spacing || {}).fromEdge ?? state.margin, layout: st.layout || 'best' });
+// Combine planned jobs that share a name into the oldest one.
+function combineJobs(group) {
+  const [keep, ...rest] = group.slice().sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  let parts;
+  try { parts = rest.reduce((acc, j) => mergeParts(acc, partsFromSettings(j.settings)), partsFromSettings(keep.settings)); }
+  catch (err) { alert(`Couldn’t combine: ${err.message}`); return; }
+  const ctx = ctxOf(keep.settings);
+  const recParts = parts.map(p => ({ p, c: computePart(p, ctx) })).filter(x => x.c.m && x.c.n)
+    .map(({ c }) => ({ matId: c.m.id, material: c.m.name, sheets: c.n, circles: c.placed, summary: c.summary }));
+  const merged = { ...clone(keep), parts: recParts, settings: settingsWithParts(keep.settings, parts) };
+  const ids = rest.map(j => j.id);
+  if (change(`Combine ${group.length} jobs named "${keep.name}"`, d => {
+    d.jobs = (d.jobs || []).filter(j => !ids.includes(j.id)).map(j => (j.id === keep.id ? clone(merged) : j));
+  })) {
+    if (ids.includes(state.jobId)) state.jobId = keep.id;
+    flash(`Combined into one “${keep.name}”`);
+  }
+}
 const findJobByName = (name, exceptId) => (inv.jobs || []).find(j => j.id !== exceptId && sameName(j.name, name));
 const describeJob = (j) => j.parts.map(p => `${p.material}: ${count(p.sheets)} ${p.sheets === 1 ? 'sheet' : 'sheets'}`).join(', ');
 // Work that isn't saved to a planned job yet (and would be lost by opening another job).
@@ -1773,13 +1835,14 @@ function mergeParts(base, extra) {
 }
 function addCurrentTo(j) {
   storeActive();
+  const fromId = state.jobId && state.jobId !== j.id ? state.jobId : null;   // an open job being merged in
   let base; try { base = partsFromSettings(j.settings); } catch (err) { alert(`Couldn’t read “${j.name}”: ${err.message}`); return; }
   const activeMat = state.parts[state.active].matId;
   state.parts = mergeParts(base, state.parts.filter(p => partCount(p) > 0));
   state.jobId = j.id; state.name = j.name; $('jobName').value = j.name;
   const k = state.parts.findIndex(p => p.matId === activeMat);
   loadPart(k >= 0 ? k : 0);
-  addToJobs(false);
+  addToJobs(false, fromId);
 }
 function newJob() {
   storeActive();
@@ -1791,7 +1854,7 @@ function newJob() {
 function renderJobPicker() {
   const jobs = inv.jobs || [], sel = $('jobPick');
   sel.innerHTML = `<option value="">${jobs.length ? 'New job (not saved yet)' : 'New job — no planned jobs yet'}</option>`
-    + jobs.map(j => `<option value="${esc(j.id)}">${esc(j.name)} · ${count(j.parts.length)} material${j.parts.length === 1 ? '' : 's'}</option>`).join('');
+    + jobs.map(j => `<option value="${esc(j.id)}">${esc(j.name)} · ${count(j.parts.length)} material${j.parts.length === 1 ? '' : 's'}${dupNames().has(normName(j.name)) ? ` · added ${new Date(j.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}` : ''}</option>`).join('');
   sel.value = jobs.some(j => j.id === state.jobId) ? state.jobId : '';
   if (state.jobId && !jobs.some(j => j.id === state.jobId)) state.jobId = null;   // it was cut or removed elsewhere
   $('jobNames').innerHTML = jobs.map(j => `<option value="${esc(j.name)}">`).join('');
@@ -1815,7 +1878,8 @@ $('jobPick').addEventListener('change', () => {
 });
 $('jobName').addEventListener('input', renderJobMatch);
 // Picking a name from the suggestions opens that job straight away when nothing unsaved is open.
-$('jobName').addEventListener('change', () => { const j = findJobByName(state.name, state.jobId); if (j && !unsavedWork()) openPlanned(j, true); });
+// (Only on a blank slate: if a job is open, the user may be renaming it, so the note's buttons decide.)
+$('jobName').addEventListener('change', () => { const j = findJobByName(state.name, state.jobId); if (j && !state.jobId && !unsavedWork()) openPlanned(j, true); });
 
 // ---------- shared stock, stored in this GitHub repository ----------
 // The stock list is a JSON file on its own branch, so stock changes never touch the
