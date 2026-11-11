@@ -147,6 +147,8 @@ input.len.bad { border-color: var(--warn-ink); background: var(--warn-bg); }
 .slider .lbl { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; color: var(--muted); margin-bottom: 2px; }
 .slider .lbl strong { color: var(--ink); font-weight: 500; font-size: 14px; }
 .slider .track { display: grid; grid-template-columns: 1fr 92px; gap: 10px; align-items: center; }
+.slider input[type=range] { display: block; }
+.dual { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; margin: 0; height: 28px; }
 
 .circ-row { display: grid; grid-template-columns: 14px 0.8fr 1fr 62px 28px; gap: 8px; align-items: center; margin-bottom: 8px; }
@@ -269,11 +271,13 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
       <h2>Spacing</h2>
       <div class="slider">
         <div class="lbl"><label for="gap">Between circles</label><strong id="gapV"></strong></div>
-        <div class="track"><input type="range" id="gap"><div class="unit-in"><input id="gapN" class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Spacing between circles"><span class="u"></span></div></div>
+        <input type="range" id="gap" aria-label="Spacing between circles">
+        <div class="dual"><div class="unit-in fixed"><input id="gapMM" class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Spacing between circles in millimetres"><span class="u">mm</span></div><div class="unit-in fixed"><input id="gapIN" class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Spacing between circles in inches"><span class="u">in</span></div></div>
       </div>
       <div class="slider">
         <div class="lbl"><label for="margin">From the sheet edge</label><strong id="marginV"></strong></div>
-        <div class="track"><input type="range" id="margin"><div class="unit-in"><input id="marginN" class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Spacing from the sheet edge"><span class="u"></span></div></div>
+        <input type="range" id="margin" aria-label="Spacing from the sheet edge">
+        <div class="dual"><div class="unit-in fixed"><input id="marginMM" class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Spacing from the sheet edge in millimetres"><span class="u">mm</span></div><div class="unit-in fixed"><input id="marginIN" class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Spacing from the sheet edge in inches"><span class="u">in</span></div></div>
       </div>
       <div class="field" style="margin-top:14px"><span>Layout</span>
         <div class="seg seg-full" id="layoutSeg" role="group" aria-label="Layout">
@@ -329,7 +333,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.11.0';
+const APP_VERSION = '1.12.0';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows at an
@@ -642,8 +646,8 @@ const state = {
 const $ = (id) => document.getElementById(id);
 const els = {
   preset: $('preset'), w: $('w'), h: $('h'),
-  gap: $('gap'), gapN: $('gapN'), gapV: $('gapV'),
-  margin: $('margin'), marginN: $('marginN'), marginV: $('marginV'),
+  gap: $('gap'), gapMM: $('gapMM'), gapIN: $('gapIN'), gapV: $('gapV'),
+  margin: $('margin'), marginMM: $('marginMM'), marginIN: $('marginIN'), marginV: $('marginV'),
   rows: $('rows'), add: $('add'), results: $('results'),
 };
 
@@ -706,20 +710,23 @@ function buildPresetOptions() {
 }
 function syncUnitsUI() {
   document.querySelectorAll('#unitSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.unit === state.unit)));
-  document.querySelectorAll('.controls .group:not(.circles) .unit-in .u').forEach(s => s.textContent = state.unit);
+  document.querySelectorAll('.controls .group:not(.circles) .unit-in:not(.fixed) .u').forEach(s => s.textContent = state.unit);
   const s = SLIDER[state.unit];
   els.gap.max = s.gapMax; els.gap.step = s.step; els.margin.max = s.marginMax; els.margin.step = s.step;
-  els.gapN.step = s.step; els.marginN.step = s.step;
 }
 function syncInputs() {
   els.w.value = fmtInput(state.w); els.h.value = fmtInput(state.h);
-  els.gap.value = state.gap; els.gapN.value = fmtInput(state.gap); els.gapV.textContent = spacingLabel(state.gap);
-  els.margin.value = state.margin; els.marginN.value = fmtInput(state.margin); els.marginV.textContent = spacingLabel(state.margin);
+  syncSpacing('gap'); syncSpacing('margin');
 }
-// "0.079 in (2 mm)" when the page is in inches, so the mm defaults stay recognisable.
-function spacingLabel(v) {
-  if (state.unit === 'mm') return fmt(v) + ' mm';
-  return fmt(v) + ' in (' + (Math.round(v * 25.4 * 10) / 10).toLocaleString('en-US') + ' mm)';
+// Spacing is always shown in both units, e.g. "2 mm · 0.079 in".
+const sheetTo = (v, u) => (u === state.unit ? v : u === 'mm' ? v * 25.4 : v / 25.4);   // sheet unit -> u
+const toSheet = (v, u) => (u === state.unit ? v : u === 'mm' ? v / 25.4 : v * 25.4);   // u -> sheet unit
+function spacingLabel(v) { return `${fmtU(sheetTo(v, 'mm'), 'mm')} mm · ${fmtU(sheetTo(v, 'in'), 'in')} in`; }
+function syncSpacing(key, skip) {
+  els[key].value = state[key];
+  if (skip !== 'mm') els[key + 'MM'].value = fmtU(sheetTo(state[key], 'mm'), 'mm').replace(/,/g, '');
+  if (skip !== 'in') els[key + 'IN'].value = fmtU(sheetTo(state[key], 'in'), 'in').replace(/,/g, '');
+  els[key + 'V'].textContent = spacingLabel(state[key]);
 }
 function fmtInput(v) { return String(state.unit === 'mm' ? Math.round(v * 100) / 100 : Math.round(v * 10000) / 10000); }
 
@@ -793,13 +800,23 @@ els.preset.addEventListener('change', () => {
   const match = presetsFor(state.unit).findIndex(p => p.w === state.w && p.h === state.h);
   state.preset = match >= 0 ? match : 'custom'; els.preset.value = state.preset; schedule();
 }));
-function bindSlider(range, num, key) {
-  range.addEventListener('input', () => { state[key] = parseFloat(range.value); num.value = fmtInput(state[key]); $(key + 'V').textContent = spacingLabel(state[key]); schedule(); });
-  num.addEventListener('change', () => { if (lenInSheetUnit(num.value) != null) num.value = fmtInput(state[key]); else markBad(num, num.value.trim() !== ''); });
-  num.addEventListener('input', () => { const v = lenInSheetUnit(num.value); if (v == null) return; markBad(num, false); state[key] = v >= 0 ? v : 0; range.value = state[key]; $(key + 'V').textContent = spacingLabel(state[key]); schedule(); });
+// Each spacing has a slider plus an mm box and an inch box; typing in either updates the other.
+function bindSpacing(key) {
+  els[key].addEventListener('input', () => { state[key] = parseFloat(els[key].value); syncSpacing(key); schedule(); });
+  for (const u of ['mm', 'in']) {
+    const box = els[key + u.toUpperCase()];
+    box.addEventListener('input', () => {
+      const p = parseLen(box.value); if (!p) return;              // maybe mid-typing; flagged on leaving
+      markBad(box, false);
+      const inBox = p.u && p.u !== u ? (p.u === 'mm' ? p.n / 25.4 : p.n * 25.4) : p.n; // "2mm" typed in the inch box still works
+      state[key] = Math.max(0, toSheet(inBox, u));
+      syncSpacing(key, p.u && p.u !== u ? null : u); schedule();
+    });
+    box.addEventListener('change', () => { if (parseLen(box.value)) syncSpacing(key); else markBad(box, box.value.trim() !== ''); });
+  }
 }
-bindSlider(els.gap, els.gapN, 'gap');
-bindSlider(els.margin, els.marginN, 'margin');
+bindSpacing('gap');
+bindSpacing('margin');
 
 document.querySelectorAll('#unitSeg button').forEach(b => b.addEventListener('click', () => {
   const to = b.dataset.unit; if (to === state.unit) return;
@@ -807,7 +824,7 @@ document.querySelectorAll('#unitSeg button').forEach(b => b.addEventListener('cl
   state.unit = to;
   state.w *= f; state.h *= f; state.gap *= f; state.margin *= f;
   const round = (v) => to === 'mm' ? Math.round(v * 10) / 10 : Math.round(v * 1000) / 1000;
-  state.w = round(state.w); state.h = round(state.h); state.gap = round(state.gap); state.margin = round(state.margin);
+  state.w = round(state.w); state.h = round(state.h); // spacing keeps full precision (shown in both units anyway)
   const match = presetsFor(to).findIndex(p => p.w === state.w && p.h === state.h);
   state.preset = match >= 0 ? match : 'custom';
   buildPresetOptions(); syncUnitsUI(); syncInputs(); renderRows(); schedule();
@@ -925,7 +942,7 @@ function renderResults(res, sizes, W, H, margin, gap) {
     if (state.name) lines.push(state.name);
     if (order) lines.push(`${order.cut ? 'Full sheets needed' : 'Sheets needed'}: ${count(order.full)} of ${order.name}${order.cut ? ` (${count(order.per)} cut pieces each${order.fromSpare ? `, plus ${count(order.fromSpare)} spare pieces from stock` : ''}${order.spare ? `, ${count(order.spare)} new spare` : ''})` : ''}`,
       `In stock ${count(order.m.stock)}, after this job ${count(order.after.stock)}, to order ${count(order.toOrder)}`);
-    lines.push(`${count(n)} ${order && order.cut ? 'cut ' : ''}${n === 1 ? 'sheet' : 'sheets'} of ${sheetName}`, `Spacing ${fmt(gap)} ${unitName()} between circles, ${fmt(margin)} ${unitName()} from the edge`, `${count(placedCount)} circles, ${pct(overall)} of material used overall`, '');
+    lines.push(`${count(n)} ${order && order.cut ? 'cut ' : ''}${n === 1 ? 'sheet' : 'sheets'} of ${sheetName}`, `Spacing ${spacingLabel(gap)} between circles, ${spacingLabel(margin)} from the edge`, `${count(placedCount)} circles, ${pct(overall)} of material used overall`, '');
     let i = 1;
     res.sheets.forEach((sh) => {
       const label = sh.reps > 1 ? `Sheets ${i}–${i + sh.reps - 1} (identical)` : `Sheet ${i}`;
