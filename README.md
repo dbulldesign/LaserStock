@@ -4,9 +4,11 @@ Sheet nesting calculator for laser cutting circles. Enter a stock sheet and the
 circles you need; it works out how many sheets to use and order, and lays the
 circles out in even grids.
 
-Current version: **1.13.0**
+Current version: **1.14.0**
 
 ## Versions
+
+- **1.14.0** — Planned jobs: Add to jobs saves the material and circles without cutting. The Jobs window totals every planned job per material against stock and shows what to buy (optionally topping up to reorder levels), with a copyable order list. Jobs can be opened, updated, marked as cut or removed, and are shared like stock.
 
 - **1.13.0** — Shared stock through GitHub: everyone sees the same materials and counts; changing them needs a GitHub key. Every change is a commit on the `stock-data` branch, and simultaneous changes are merged.
 
