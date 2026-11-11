@@ -90,6 +90,10 @@ button, input, select { font: inherit; color: inherit; }
   font-family: "Barlow Semi Condensed", "Barlow", sans-serif;
   font-weight: 600; font-size: 26px; line-height: 1.1; margin: 0; letter-spacing: -0.01em;
 }
+.top h1 .ver { font-family: "Barlow", sans-serif; font-size: 13px; font-weight: 500; color: var(--muted); margin-left: 8px; letter-spacing: 0; vertical-align: middle; }
+.update { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 10px 24px; background: var(--accent); color: var(--accent-ink); font-weight: 500; }
+.update[hidden] { display: none; }
+.update .btn { background: var(--accent-ink); color: var(--accent); border-color: var(--accent-ink); font-weight: 600; }
 .top p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
 .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; margin-left: auto; }
 .seg button { background: var(--surface); border: 0; padding: 7px 14px; cursor: pointer; color: var(--muted); }
@@ -161,9 +165,13 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 </style>
 </head>
 <body>
+<div class="update" id="update" role="status" hidden>
+  <span id="updateMsg">A new version is available.</span>
+  <button type="button" class="btn" id="updateBtn">Reload to update</button>
+</div>
 <header class="top">
   <div>
-    <h1>Sheet nesting calculator</h1>
+    <h1>Sheet nesting calculator<span class="ver" id="ver"></span></h1>
     <p>Enter your stock sheet and the circles you need. It works out how many sheets to buy, how much of each sheet gets used, and lays the circles out for you.</p>
   </div>
   <div class="seg" role="group" aria-label="Units">
@@ -207,6 +215,12 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
   <section class="results" id="results" aria-live="polite"></section>
 </main>
 
+<script>
+// ---------- version ----------
+// Bump this on every change that gets merged to main. Open copies of the page
+// notice the new number and offer a reload.
+const APP_VERSION = '1.1.0';
+</script>
 <script>
 // Circle nesting engine: greedy largest-first placement with hex/square grid seeding
 // and tangent-candidate bottom-left heuristics. Coordinates: origin bottom-left.
@@ -687,6 +701,33 @@ function sheetSVG(sh, sizes, W, H, margin) {
   s += '</svg>';
   return s;
 }
+
+// ---------- version + update check ----------
+function cmpVersion(a, b) {
+  const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0); if (d) return Math.sign(d);
+  }
+  return 0;
+}
+async function checkForUpdate() {
+  if (location.protocol === 'file:') return; // nothing to check against when opened from disk
+  try {
+    const url = location.href.split('#')[0];
+    const res = await fetch(url + (url.includes('?') ? '&' : '?') + 'v=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return;
+    const m = (await res.text()).match(/const APP_VERSION = '([^']+)'/);
+    if (m && cmpVersion(m[1], APP_VERSION) > 0) {
+      $('updateMsg').textContent = `Version ${m[1]} is available (you have ${APP_VERSION}).`;
+      $('update').hidden = false;
+    }
+  } catch { /* offline: try again later */ }
+}
+$('ver').textContent = 'v' + APP_VERSION;
+$('updateBtn').addEventListener('click', () => location.reload());
+checkForUpdate();
+setInterval(checkForUpdate, 10 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(); });
 
 // ---------- init ----------
 buildPresetOptions(); syncUnitsUI(); syncInputs(); renderRows(); calculate();
