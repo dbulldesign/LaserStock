@@ -176,6 +176,14 @@ dialog.dlg::backdrop { background: rgba(0, 0, 0, .45); }
 .dlg-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 18px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .dlg-head h2 { margin: 0 auto 0 0; font-size: 18px; }
 .dlg-body { padding: 14px 18px 22px; }
+.add-form { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) auto; gap: 8px 12px; align-items: end; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; margin: 0 0 14px; }
+.add-form label > span { display: block; color: var(--muted); font-size: 12.5px; margin-bottom: 3px; }
+.add-form select, .add-form input { width: 100%; padding: 7px 8px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); }
+.add-form .hint { grid-column: 1 / -1; margin: 0; }
+@media (max-width: 600px) { .add-form { grid-template-columns: 1fr; } }
+.count { color: var(--muted); font-weight: 400; margin-left: 6px; }
+.mat-card.flash { animation: flash 1.2s ease-out; }
+@keyframes flash { from { box-shadow: 0 0 0 3px var(--accent); } to { box-shadow: 0 0 0 3px transparent; } }
 .mat-card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; margin: 0 0 12px; }
 .mat-card.low { border-left: 4px solid var(--accent); }
 .mat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 12px; margin-top: 10px; }
@@ -241,7 +249,8 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
     </section>
     <section class="group">
       <h2>Stock sheet</h2>
-      <label class="field"><span>Size</span><select id="preset"></select></label>
+      <label class="field"><span>Find material <span id="matCount" class="count"></span></span><input id="matSearch" class="len" type="search" autocomplete="off" placeholder="e.g. R99, brightview wide, 24 x 72"></label>
+      <label class="field" style="margin-top:10px"><span>Size</span><select id="preset"></select></label>
       <div class="field-row">
         <label class="field"><span>Width</span><div class="unit-in"><input id="w" class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false"><span class="u"></span></div></label>
         <label class="field"><span>Height</span><div class="unit-in"><input id="h" class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false"><span class="u"></span></div></label>
@@ -292,6 +301,15 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
   </div>
   <div class="dlg-body">
     <p class="hint" style="margin-top:0">Each material appears in the Size list. Stock counts are saved in this browser; use Export to back them up or move them to another computer. “Cut to” is the piece size that goes in the laser; leave it blank if sheets go in whole.</p>
+    <div class="add-form" id="addForm">
+      <label><span>Type</span><select id="addType"></select></label>
+      <label id="newTypeWrap" hidden><span>New type name</span><input id="newType" placeholder="e.g. Clear acrylic 3 mm"></label>
+      <label><span>Variant / colour</span><input id="addVariant" placeholder="e.g. R02"></label>
+      <button type="button" class="btn primary" id="addMatBtn">Add to list</button>
+      <p class="hint" id="addSize"></p>
+    </div>
+    <label class="field" style="margin:4px 0 12px"><span>Search materials <span id="dlgCount" class="count"></span></span><input id="dlgSearch" class="len" type="search" autocomplete="off" placeholder="Type, variant, size or notes"></label>
+    <datalist id="typeList"></datalist>
     <div id="matList"></div>
     <h3 style="margin:22px 0 8px;font-size:16px">History</h3>
     <div id="histList"></div>
@@ -302,7 +320,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.10.0';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows at an
@@ -474,10 +492,17 @@ function nestCircles(opts) {
 // (same unit): circles are nested on the cut size, and the results also show
 // how many full stock sheets to order.
 // They appear at the top of the dropdown and convert when you switch units.
-const MATERIALS = [
-  { name: 'Fade Not Poly', w: 24, h: 24, unit: 'in' },
-  { name: 'Brightview', w: 24, h: 72, unit: 'in', cut: { w: 24, h: 36 } },
+// Material types know their sheet size; each material is a type plus a variant
+// (colour, grade…). Adding a new variant of a type picks up the type's size.
+const MATERIAL_TYPES = [
+  { type: 'Fade Not Poly', w: 24, h: 24, unit: 'in' },
+  { type: 'Brightview', w: 24, h: 72, unit: 'in', cut: { w: 24, h: 36 } },
 ];
+const typeSpec = (t) => MATERIAL_TYPES.find(x => x.type === t);
+const MATERIALS = [
+  ['Fade Not Poly', 'R02'], ['Fade Not Poly', 'R3409'], ['Fade Not Poly', 'R99'],
+  ['Brightview', 'Narrow'], ['Brightview', 'Medium'], ['Brightview', 'Wide'], ['Brightview', 'Extra Wide'],
+].map(([type, variant]) => ({ ...typeSpec(type), type, variant }));
 // ---------- materials library + stock (saved in this browser) ----------
 // MATERIALS above only seeds the library the first time; after that, materials and
 // stock counts are edited in the Stock dialog and kept in localStorage.
@@ -487,14 +512,26 @@ function cleanMaterial(m) {
   const n = (v, d = 0) => (typeof v === 'number' && isFinite(v) && v >= 0 ? v : d);
   const unit = m.unit === 'mm' ? 'mm' : 'in';
   const cut = m.cut && n(m.cut.w) > 0 && n(m.cut.h) > 0 ? { w: m.cut.w, h: m.cut.h } : null;
-  return { id: m.id || uid(), name: String(m.name || 'Material').slice(0, 80), unit, w: n(m.w, 24) || 24, h: n(m.h, 48) || 48, cut,
+  const type = String(m.type || m.name || 'Material').trim().slice(0, 60) || 'Material';
+  const variant = String(m.variant || '').trim().slice(0, 60);
+  return { id: m.id || uid(), type, variant, name: variant ? `${type} - ${variant}` : type, unit, w: n(m.w, 24) || 24, h: n(m.h, 48) || 48, cut,
     stock: Math.floor(n(m.stock)), spare: Math.floor(n(m.spare)), reorderAt: Math.floor(n(m.reorderAt)), notes: String(m.notes || '').slice(0, 300) };
 }
-function seedInventory() { return { materials: MATERIALS.map(m => cleanMaterial(m)), history: [] }; }
+const INV_FORMAT = 2;
+function seedInventory() { return { format: INV_FORMAT, materials: MATERIALS.map(m => cleanMaterial(m)), history: [] }; }
 function loadInventory() {
   try {
     const d = JSON.parse(localStorage.getItem(INV_KEY));
-    if (d && Array.isArray(d.materials)) return { materials: d.materials.map(cleanMaterial), history: Array.isArray(d.history) ? d.history.slice(0, 500) : [] };
+    if (d && Array.isArray(d.materials)) {
+      const out = { format: INV_FORMAT, materials: d.materials.map(cleanMaterial), history: Array.isArray(d.history) ? d.history.slice(0, 500) : [] };
+      if ((d.format || 1) < 2) {
+        // 1.9.0 had one plain 'Fade Not Poly' and one 'Brightview'. Drop those if they hold no
+        // stock, and add the named variants that are missing.
+        out.materials = out.materials.filter(m => m.variant || !typeSpec(m.type) || m.stock || m.spare);
+        for (const seed of MATERIALS.map(m => cleanMaterial(m))) if (!out.materials.some(m => m.name === seed.name)) out.materials.push(seed);
+      }
+      return out;
+    }
   } catch {}
   return seedInventory();
 }
@@ -557,11 +594,11 @@ function presetsFor(unit) {
     if (m.cut) {
       // The laser sees the cut-down piece; the full sheet is what gets ordered.
       const cw = roundTo(m.cut.w * f, unit), ch = roundTo(m.cut.h * f, unit);
-      const base = `${m.name} ${m.w} × ${m.h} ${m.unit}, cut to ${m.cut.w} × ${m.cut.h}`;
+      const base = `${m.name} - ${m.w} × ${m.h} ${m.unit}, cut to ${m.cut.w} × ${m.cut.h}`;
       const label = m.unit === unit ? base : `${base} (${cw} × ${ch} ${unit})`;
       return { label, w: cw, h: ch, mat: m };
     }
-    const label = m.unit === unit ? `${m.name} ${m.w} × ${m.h} ${m.unit}` : `${m.name} ${m.w} × ${m.h} ${m.unit} (${w} × ${h} ${unit})`;
+    const label = m.unit === unit ? `${m.name} - ${m.w} × ${m.h} ${m.unit}` : `${m.name} - ${m.w} × ${m.h} ${m.unit} (${w} × ${h} ${unit})`;
     return { label, w, h, mat: m };
   });
   return mats.concat(GENERIC[unit]);
@@ -633,11 +670,23 @@ const diaOf = (c) => 'Ø' + fmtU(c.d, c.u) + ' ' + c.u;
 const toSheetUnit = (v, u) => (u === state.unit ? v : u === 'mm' ? v / 25.4 : v * 25.4);
 
 // ---------- controls ----------
+// Search words must all appear in the label ("bright wide", "r99", "24 x 72").
+const matches = (label, q) => { const t = label.toLowerCase().replace(/×/g, 'x'); return q.toLowerCase().replace(/×/g, 'x').split(/\s+/).filter(Boolean).every(w => t.includes(w)); };
 function buildPresetOptions() {
+  const q = $('matSearch') ? $('matSearch').value.trim() : '';
   els.preset.innerHTML = '';
-  presetsFor(state.unit).forEach((p, i) => { const o = document.createElement('option'); o.value = i; o.textContent = p.label; els.preset.appendChild(o); });
+  const groups = new Map(); let shown = 0;
+  presetsFor(state.unit).forEach((p, i) => {
+    if (q && i !== state.preset && !matches(p.label, q)) return; // keep the current choice visible
+    const g = p.mat ? p.mat.type : 'Standard sizes';
+    if (!groups.has(g)) { const og = document.createElement('optgroup'); og.label = g; groups.set(g, og); els.preset.appendChild(og); }
+    const o = document.createElement('option'); o.value = i; o.textContent = p.label; groups.get(g).appendChild(o);
+    if (!q || matches(p.label, q)) shown++;
+  });
   const c = document.createElement('option'); c.value = 'custom'; c.textContent = 'Custom size'; els.preset.appendChild(c);
+  const a = document.createElement('option'); a.value = 'add'; a.textContent = 'Add a material…'; els.preset.appendChild(a);
   els.preset.value = state.preset;
+  if ($('matCount')) $('matCount').textContent = q ? (shown ? `${shown} match${shown === 1 ? '' : 'es'}` : 'No matches') : '';
 }
 function syncUnitsUI() {
   document.querySelectorAll('#unitSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.unit === state.unit)));
@@ -709,6 +758,7 @@ els.add.addEventListener('click', () => {
 });
 
 els.preset.addEventListener('change', () => {
+  if (els.preset.value === 'add') { els.preset.value = state.preset; openStock(true); return; }
   if (els.preset.value === 'custom') { state.preset = 'custom'; els.w.focus(); els.w.select(); return; }
   state.preset = +els.preset.value;
   const p = presetsFor(state.unit)[state.preset]; state.w = p.w; state.h = p.h; syncInputs(); schedule();
@@ -959,6 +1009,7 @@ function buildJobFile() {
     name: state.name,
     settings: {
       unit: state.unit, preset: presetLabel,
+      material: state.preset === 'custom' ? null : ((presetsFor(state.unit)[state.preset] || {}).mat || {}).name || null,
       sheet: { width: state.w, height: state.h },                         // full precision, so reopening
       spacing: { betweenCircles: state.gap, fromEdge: state.margin },     // gives exactly the same layout
       layout: state.layout,
@@ -1024,7 +1075,8 @@ function applyJob(job) {
   state.circles = circles.length ? circles : [{ d: unit === 'mm' ? 100 : 4, q: 10, u: unit }];
   state.name = typeof job.name === 'string' ? job.name : '';
   const presets = presetsFor(unit);
-  let match = presets.findIndex(p => p.label === st.preset && p.w === w && p.h === h);
+  let match = st.material ? presets.findIndex(p => p.mat && p.mat.name === st.material && p.w === w && p.h === h) : -1;
+  if (match < 0) match = presets.findIndex(p => p.label === st.preset && p.w === w && p.h === h);
   if (match < 0) match = presets.findIndex(p => p.w === w && p.h === h);
   state.preset = match >= 0 ? match : 'custom';
   buildPresetOptions(); syncUnitsUI(); syncInputs(); renderRows(); syncLayoutUI();
@@ -1059,6 +1111,17 @@ document.addEventListener('keydown', (e) => {
   if (k === 'o') { e.preventDefault(); $('fileIn').click(); }
 });
 
+// ---------- material search (Size list) ----------
+$('matSearch').addEventListener('input', () => {
+  const q = $('matSearch').value.trim();
+  buildPresetOptions();
+  if (!q) return;
+  const list = presetsFor(state.unit), cur = state.preset === 'custom' ? null : list[state.preset];
+  if (cur && matches(cur.label, q)) return;
+  const i = list.findIndex(p => matches(p.label, q));
+  if (i >= 0) { state.preset = i; state.w = list[i].w; state.h = list[i].h; buildPresetOptions(); syncInputs(); schedule(); }
+});
+
 // ---------- materials & stock dialog ----------
 const dlg = $('stockDlg');
 const numOr = (v, d) => { const x = parseFloat(v); return isFinite(x) && x >= 0 ? x : d; };
@@ -1081,12 +1144,17 @@ function updateLowBadge() {
   const b = $('lowBadge'); b.hidden = !low; b.textContent = low; b.title = `${low} material${low === 1 ? '' : 's'} at or below reorder level`;
 }
 function renderInv() {
-  $('matList').innerHTML = inv.materials.length ? inv.materials.map((m, i) => {
+  const dq = $('dlgSearch').value.trim();
+  const visible = inv.materials.map((m, i) => [m, i]).filter(([m]) => !dq || matches(`${m.name} ${m.w} x ${m.h} ${m.unit} ${m.cut ? `${m.cut.w} x ${m.cut.h}` : ''} ${m.notes}`, dq));
+  $('dlgCount').textContent = dq ? `${visible.length} of ${inv.materials.length}` : '';
+  renderAddForm();
+  $('matList').innerHTML = !inv.materials.length ? '<p class="empty">No materials yet. Add one above.</p>' : !visible.length ? '<p class="empty">No materials match that search.</p>' : visible.map(([m, i]) => {
     const low = m.reorderAt > 0 && m.stock <= m.reorderAt;
     const per = m.cut ? piecesPerStock(m.w, m.h, m.cut.w, m.cut.h) : 1;
     return `<div class="mat-card${low ? ' low' : ''}" data-m="${i}">
       <div class="mat-top">
-        <label class="mat-name"><span>Name</span><input data-f="name" value="${esc(m.name)}"></label>
+        <label class="mat-name"><span>Type</span><input data-f="type" list="typeList" value="${esc(m.type)}"></label>
+        <label class="mat-name"><span>Variant / colour</span><input data-f="variant" value="${esc(m.variant)}"></label>
         <button type="button" class="btn" data-act="receive">Receive sheets…</button>
         <button type="button" class="btn" data-act="delete" aria-label="Delete ${esc(m.name)}">Delete</button>
       </div>
@@ -1101,7 +1169,8 @@ function renderInv() {
       </div>
       <p class="mat-note">${m.cut ? (per ? `${count(per)} cut pieces per full sheet.` : 'The cut size doesn’t fit on the full sheet.') : 'Sheets go in the laser whole.'}${low ? ` <b>At or below reorder level.</b>` : ''}</p>
     </div>`;
-  }).join('') : '<p class="empty">No materials yet. Use Add material.</p>';
+  }).join('');
+  $('typeList').innerHTML = knownTypes().map(t => `<option value="${esc(t)}">`).join('');
   const hist = inv.history.slice(0, 100);
   $('histList').innerHTML = hist.length ? `<table class="hist"><thead><tr><th>When</th><th>Material</th><th>Change</th><th>Job / note</th><th></th></tr></thead><tbody>${hist.map(h => `
     <tr><td>${new Date(h.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</td><td>${esc(h.material)}</td>
@@ -1111,18 +1180,63 @@ function renderInv() {
 }
 function invChanged() { saveInventory(); refreshPresets(); schedule(); }
 
-$('stockBtn').addEventListener('click', () => { renderInv(); dlg.showModal(); });
+$('stockBtn').addEventListener('click', () => openStock(false));
 $('stockClose').addEventListener('click', () => dlg.close());
-$('addMat').addEventListener('click', () => {
-  const mm = state.unit === 'mm';
-  inv.materials.push(cleanMaterial({ name: 'New material', unit: state.unit, w: mm ? 1220 : 48, h: mm ? 2440 : 96 }));
-  invChanged(); renderInv();
-  const cards = $('matList').querySelectorAll('.mat-card'); const inp = cards[cards.length - 1].querySelector('[data-f="name"]'); inp.focus(); inp.select();
-});
+// Types: the built-in ones plus any type already in the list. A type's size comes from
+// the first material of that type in the list, else from MATERIAL_TYPES.
+function knownTypes() { return [...new Set(MATERIAL_TYPES.map(t => t.type).concat(inv.materials.map(m => m.type)))]; }
+function sizeOfType(t) {
+  const m = inv.materials.find(x => x.type === t) || typeSpec(t);
+  return m ? { w: m.w, h: m.h, unit: m.unit, cut: m.cut ? { ...m.cut } : null } : null;
+}
+function renderAddForm() {
+  const sel = $('addType'), keep = sel.value;
+  sel.innerHTML = knownTypes().map(t => `<option>${esc(t)}</option>`).join('') + '<option value="__new">New type…</option>';
+  if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+  updateAddSize();
+}
+function updateAddSize() {
+  const isNew = $('addType').value === '__new';
+  $('newTypeWrap').hidden = !isNew;
+  const sz = isNew ? null : sizeOfType($('addType').value);
+  $('addSize').textContent = sz ? `Size: ${sz.w} × ${sz.h} ${sz.unit}${sz.cut ? `, cut to ${sz.cut.w} × ${sz.cut.h}` : ''}. You can change it after adding.`
+    : 'A new type starts at 24 × 48 in; set its size in the card after adding.';
+}
+$('addType').addEventListener('change', updateAddSize);
+function addMaterial() {
+  const isNew = $('addType').value === '__new';
+  const type = (isNew ? $('newType').value : $('addType').value).trim();
+  const variant = $('addVariant').value.trim();
+  if (!type) { $('newType').focus(); return; }
+  const name = variant ? `${type} - ${variant}` : type;
+  if (inv.materials.some(m => m.name === name)) { alert(`${name} is already in the list.`); return; }
+  const sz = (!isNew && sizeOfType(type)) || { w: 24, h: 48, unit: 'in', cut: null };
+  // Keep each type together in the list.
+  const m = cleanMaterial({ type, variant, ...sz });
+  let at = -1; inv.materials.forEach((x, i) => { if (x.type === type) at = i; });
+  inv.materials.splice(at >= 0 ? at + 1 : inv.materials.length, 0, m);
+  $('addVariant').value = ''; $('newType').value = '';
+  if (isNew) $('addType').value = type;
+  invChanged(); $('dlgSearch').value = ''; renderInv();
+  flash(`Added ${name}`);
+  const card = $('matList').querySelector(`.mat-card[data-m="${inv.materials.indexOf(m)}"]`);
+  if (card) { card.scrollIntoView({ block: 'nearest' }); card.classList.add('flash'); }
+}
+$('addMatBtn').addEventListener('click', addMaterial);
+$('addVariant').addEventListener('keydown', (e) => { if (e.key === 'Enter') addMaterial(); });
+$('newType').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('addVariant').focus(); });
+$('dlgSearch').addEventListener('input', renderInv);
+$('addMat').addEventListener('click', () => { $('addVariant').focus(); });
+function openStock(focusAdd) { renderInv(); dlg.showModal(); if (focusAdd) $('addVariant').focus(); }
 $('matList').addEventListener('change', (e) => {
   const card = e.target.closest('.mat-card'), f = e.target.dataset.f; if (!card || !f) return;
   const m = inv.materials[+card.dataset.m], v = e.target.value;
-  if (f === 'name') m.name = v.trim().slice(0, 80) || m.name;
+  if (f === 'type' || f === 'variant') {
+    const nt = f === 'type' ? (v.trim().slice(0, 60) || m.type) : m.type, nv = f === 'variant' ? v.trim().slice(0, 60) : m.variant;
+    const nn = nv ? `${nt} - ${nv}` : nt;
+    if (inv.materials.some(x => x !== m && x.name === nn)) { alert(`${nn} is already in the list.`); renderInv(); return; }
+    m.type = nt; m.variant = nv; m.name = nn;
+  }
   else if (f === 'notes') m.notes = v.slice(0, 300);
   else if (f === 'unit') m.unit = v === 'mm' ? 'mm' : 'in';
   else if (f === 'w' || f === 'h') m[f] = numOr(v, m[f]) || m[f];

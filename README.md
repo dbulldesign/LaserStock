@@ -4,9 +4,11 @@ Sheet nesting calculator for laser cutting circles. Enter a stock sheet and the
 circles you need; it works out how many sheets to use and order, and lays the
 circles out in even grids.
 
-Current version: **1.9.0**
+Current version: **1.10.0**
 
 ## Versions
+
+- **1.10.0** — Materials are a type plus a variant (Fade Not Poly - R02, Brightview - Wide…). Adding a variant picks up the type's sheet and cut size. Size list grouped by type with a Find material search; the Stock dialog has its own search. Job files remember the exact material.
 
 - **1.9.0** — Materials & stock: save each material (sheet size, optional cut size, notes), track full sheets and spare cut pieces on hand with a reorder level, see In stock / After this job / To order for each job, mark jobs as cut, receive sheets, history with undo, export/import. Stock is kept in the browser.
 
