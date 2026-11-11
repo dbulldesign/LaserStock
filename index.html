@@ -103,6 +103,12 @@ button, input, select { font: inherit; color: inherit; }
 .top p { margin: 4px 0 0; color: var(--muted); max-width: 60ch; }
 .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; margin-left: auto; }
 .seg button { background: var(--surface); border: 0; padding: 7px 14px; cursor: pointer; color: var(--muted); }
+.top-actions { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.top-actions .seg { margin-left: 0; }
+.seg-full { display: flex; margin: 6px 0 0; }
+.seg-full button { flex: 1; padding: 7px 6px; }
+.layout.collapsed { grid-template-columns: minmax(0, 1fr); }
+.layout.collapsed .controls { display: none; }
 .seg button + button { border-left: 1px solid var(--line-strong); }
 .seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
 
@@ -121,8 +127,9 @@ button, input, select { font: inherit; color: inherit; }
 .group:last-child { border-bottom: 0; }
 .group h2 { font-weight: 600; font-size: 15px; margin: 0 0 10px; }
 .group h2 small { font-weight: 400; color: var(--muted); margin-left: 6px; }
-label.field { display: block; }
-label.field > span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+.field { display: block; }
+.controls .field + .hint { margin-top: 8px; }
+.field > span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
 select, input[type="number"], input.len {
   width: 100%; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface);
@@ -184,14 +191,17 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
     <h1><img class="logo" src="icon.svg" alt="" width="28" height="28">Sheet nesting calculator<span class="ver" id="ver"></span></h1>
     <p>Enter your stock sheet and the circles you need. It works out how many sheets to buy, how much of each sheet gets used, and lays the circles out for you.</p>
   </div>
-  <div class="seg" role="group" aria-label="Sheet and spacing units">
+  <div class="top-actions">
+  <button type="button" class="btn" id="panelBtn" aria-controls="controls" aria-expanded="true"><span aria-hidden="true">☰</span> <span id="panelLbl">Hide settings</span></button>
+  <div class="seg" id="unitSeg" role="group" aria-label="Sheet and spacing units">
     <button type="button" data-unit="in" aria-pressed="true">inches</button>
     <button type="button" data-unit="mm" aria-pressed="false">millimetres</button>
+  </div>
   </div>
 </header>
 
 <main class="layout">
-  <aside class="controls" aria-label="Inputs">
+  <aside class="controls" id="controls" aria-label="Inputs">
     <section class="group">
       <h2>Stock sheet</h2>
       <label class="field"><span>Size</span><select id="preset"></select></label>
@@ -211,6 +221,14 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
         <div class="lbl"><label for="margin">From the sheet edge</label><strong id="marginV"></strong></div>
         <div class="track"><input type="range" id="margin"><div class="unit-in"><input id="marginN" class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Spacing from the sheet edge"><span class="u"></span></div></div>
       </div>
+      <div class="field" style="margin-top:14px"><span>Layout</span>
+        <div class="seg seg-full" id="layoutSeg" role="group" aria-label="Layout">
+          <button type="button" data-layout="best" aria-pressed="true">Best fit</button>
+          <button type="button" data-layout="square" aria-pressed="false">Square</button>
+          <button type="button" data-layout="stagger" aria-pressed="false">Staggered</button>
+        </div>
+      </div>
+      <p class="hint">Rows are always straight. Staggered shifts every other row by half a circle so rows nest closer; Best fit uses it only where it fits more.</p>
     </section>
 
     <section class="group circles">
@@ -219,7 +237,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
       <div id="rows"></div>
       <button type="button" class="btn" id="add">Add another size</button>
       <p class="hint">Type a unit with any size to convert it: <b>25mm</b>, <b>2.5cm</b>, <b>1 1/2"</b> or <b>2ft</b>. On a circle it switches that row's unit.</p>
-      <p class="hint">Each size is cut in an even grid of rows and columns, largest size first. Sheets that come out identical are drawn once.</p>
+      <p class="hint">Each size is cut as one evenly spaced block per sheet, largest size first. Sheets that come out identical are drawn once.</p>
     </section>
   </aside>
 
@@ -230,15 +248,27 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '1.7.0';
 </script>
 <script>
-// Circle nesting engine: grid-only placement. Every size is cut in straight rows and
-// columns at an even pitch (diameter + spacing). On each sheet a size gets exactly one
+// Circle nesting engine: grid-only placement. Every size is cut in straight rows at an
+// even pitch (diameter + spacing), either as a square grid or with every other row
+// shifted half a pitch (staggered). On each sheet a size gets exactly one
 // rectangular grid block; blocks are packed largest size first into free rectangles
 // (guillotine splits), and anything that doesn't fit rolls onto the next sheet.
 // Coordinates: origin bottom-left.
 function nestCircles(opts) {
+  // Best fit: run the whole job mixed (square or staggered per block), all-square and
+  // all-staggered, and keep whichever needs the fewest sheets (ties keep the first).
+  if ((opts.layout || 'best') === 'best') {
+    let best = null;
+    for (const layout of ['mixed', 'square', 'stagger']) {
+      const res = nestCircles({ ...opts, layout });
+      if (res.error) return res;
+      if (!best || res.totalSheets < best.totalSheets || (res.totalSheets === best.totalSheets && res.unplaced < best.unplaced)) best = res;
+    }
+    return best;
+  }
   const W = opts.W, H = opts.H, margin = Math.max(0, opts.margin || 0), gap = Math.max(0, opts.gap || 0);
   const sizes = opts.sizes; // [{d, q}]
   const maxSheets = opts.maxSheets || 2000;
@@ -252,56 +282,88 @@ function nestCircles(opts) {
   if (!sizes.some(s => s.q > 0)) return { error: 'empty' };
 
   // Size indexes, largest first.
+  // 'mixed' picks square or staggered per block, whichever holds more; ties go to square.
+  const layout = opts.layout;
+  const patterns = layout === 'square' ? ['square'] : layout === 'stagger' ? ['stagger'] : ['square', 'best', 'stagger'];
   const order = sizes.map((s, t) => t).sort((a, b) => (sizes[b].d - sizes[a].d) || (a - b));
   const fitCount = (len, p) => Math.floor((len + gap) / p + 1e-9); // circles of pitch p along len
 
   // Pack one sheet. `swap` lays rows along the sheet height instead of the width;
   // `tall` gives the space beside a block the full height instead of the space above it the full width.
-  function packSheet(rem, swap, tall) {
+  // Capacity of a free rectangle for one size, laid out square or staggered.
+  // Staggered: straight rows, every other row shifted half a pitch and nested closer,
+  // so every neighbour (along the row and diagonally) is exactly one pitch apart.
+  function squareFit(f, p) { const cols = fitCount(f.w, p), rows = fitCount(f.h, p); return { cap: cols * rows, cols, rows }; }
+  function staggerFit(f, d, p) {
+    const s = p * Math.sqrt(3) / 2;
+    const ce = fitCount(f.w, p), co = fitCount(f.w - p / 2, p);
+    let rows = f.h + eps >= d ? Math.floor((f.h - d) / s + 1e-9) + 1 : 0;
+    if (co === 0) rows = Math.min(rows, 1); // no room for the shifted row
+    return { cap: ce * Math.ceil(rows / 2) + co * Math.floor(rows / 2), ce, co, rows, s };
+  }
+
+  // Pack one sheet. `swap` lays rows along the sheet height instead of the width;
+  // `tall` gives the space beside a block the full height instead of the space above it
+  // the full width; `pattern` is 'square', 'stagger', or 'best' (whichever holds more per block).
+  function packSheet(rem, swap, tall, pattern) {
     const SW = swap ? uH : uW, SH = swap ? uW : uH;
     let free = [{ x: 0, y: 0, w: SW, h: SH }];
     const placed = [], blocks = [], consumed = new Array(nTypes).fill(0);
     let area = 0, maxX = 0, maxY = 0;
+    const put = (lx, ly, r, t) => {
+      const x = margin + (swap ? ly : lx), y = margin + (swap ? lx : ly);
+      placed.push({ x, y, r, t });
+      if (x + r > maxX) maxX = x + r; if (y + r > maxY) maxY = y + r;
+    };
     for (const t of order) {
       const d = sizes[t].d, r = d / 2, p = d + gap;
-      let q = rem[t];
-      if (q > 0) {
-        // The free rectangle that takes the most of this size, so each size stays in
-        // as few grid blocks as possible (ties: bottom-most, then left-most).
-        let k = -1, kCap = 0;
-        free.forEach((f, i) => {
-          const cap = Math.min(q, fitCount(f.w, p) * fitCount(f.h, p));
-          if (cap > kCap || (cap === kCap && cap > 0 && ((f.y - free[k].y) || (f.x - free[k].x)) < 0)) { k = i; kCap = cap; }
-        });
-        if (k < 0) continue;
-        const f = free.splice(k, 1)[0];
-        const cols = fitCount(f.w, p), maxRows = fitCount(f.h, p);
-        const n = Math.min(q, cols * maxRows);
-        const usedCols = Math.min(cols, n), rows = Math.ceil(n / usedCols), last = n - (rows - 1) * usedCols;
-        for (let j = 0; j < rows; j++) {
-          const inRow = j === rows - 1 ? last : usedCols;
-          for (let i = 0; i < inRow; i++) {
-            const lx = f.x + r + i * p, ly = f.y + r + j * p;
-            const x = margin + (swap ? ly : lx), y = margin + (swap ? lx : ly);
-            placed.push({ x, y, r, t });
-            if (x + r > maxX) maxX = x + r; if (y + r > maxY) maxY = y + r;
-          }
+      const q = rem[t];
+      if (q <= 0) continue;
+      // The free rectangle that takes the most of this size, so each size stays in
+      // one block (ties: bottom-most, then left-most). Square wins a tie with staggered.
+      let k = -1, kCap = 0, kStag = false;
+      free.forEach((f, i) => {
+        const sq = pattern === 'stagger' ? 0 : Math.min(q, squareFit(f, p).cap);
+        const st = pattern === 'square' ? 0 : Math.min(q, staggerFit(f, d, p).cap);
+        const cap = Math.max(sq, st), stag = st > sq;
+        if (cap > kCap || (cap === kCap && cap > 0 && ((f.y - free[k].y) || (f.x - free[k].x)) < 0)) { k = i; kCap = cap; kStag = stag; }
+      });
+      if (k < 0) continue;
+      const f = free.splice(k, 1)[0];
+      let n = kCap, bw, bh, rows, last, block;
+      if (kStag) {
+        const g = staggerFit(f, d, p);
+        let left = n, ext = 0; rows = 0; const counts = [];
+        while (left > 0) {
+          const off = rows % 2 ? p / 2 : 0, cnt = Math.min(left, rows % 2 ? g.co : g.ce);
+          for (let i = 0; i < cnt; i++) put(f.x + r + off + i * p, f.y + r + rows * g.s, r, t);
+          ext = Math.max(ext, off + cnt * p); counts.push(cnt); left -= cnt; rows++;
         }
-        blocks.push({ t, n, cols: usedCols, rows });
-        area += n * Math.PI * r * r; consumed[t] += n; q -= n;
-        // Split what is left of the rectangle (each piece starts one spacing clear of the circles).
-        const bw = usedCols * p, bh = rows * p;
-        if (tall) {
-          if (f.w - bw > 0) free.push({ x: f.x + bw, y: f.y, w: f.w - bw, h: f.h });                      // beside the block, full height
-          if (f.h - bh > 0) free.push({ x: f.x, y: f.y + bh, w: bw - gap, h: f.h - bh });                 // above the block
-          if (bw - last * p - gap > 0) free.push({ x: f.x + last * p, y: f.y + (rows - 1) * p, w: bw - last * p - gap, h: p - gap }); // end of last row
-        } else {
-          if (f.h - bh > 0) free.push({ x: f.x, y: f.y + bh, w: f.w, h: f.h - bh });                      // above the block, full width
+        bw = ext; bh = (rows - 1) * g.s + d + gap; last = null;
+        block = { t, n, rows, stagger: rows > 1, ce: counts[0], co: counts.length > 1 ? Math.max(...counts.filter((c, j) => j % 2)) : 0, cols: counts[0], full: counts.every((c, j) => c === (j % 2 ? g.co : g.ce)) };
+      } else {
+        const g = squareFit(f, p);
+        const cols = Math.min(g.cols, n); rows = Math.ceil(n / cols); last = n - (rows - 1) * cols;
+        for (let j = 0; j < rows; j++) for (let i = 0; i < (j === rows - 1 ? last : cols); i++) put(f.x + r + i * p, f.y + r + j * p, r, t);
+        bw = cols * p; bh = rows * p;
+        block = { t, n, cols, rows, stagger: false };
+      }
+      blocks.push(block);
+      area += n * Math.PI * r * r; consumed[t] += n;
+      // Split what is left of the rectangle (each piece starts one spacing clear of the circles).
+      if (tall) {
+        if (f.w - bw > 0) free.push({ x: f.x + bw, y: f.y, w: f.w - bw, h: f.h });                      // beside the block, full height
+        if (f.h - bh > 0) free.push({ x: f.x, y: f.y + bh, w: bw - gap, h: f.h - bh });                 // above the block
+        if (last != null && bw - last * p - gap > 0) free.push({ x: f.x + last * p, y: f.y + (rows - 1) * p, w: bw - last * p - gap, h: p - gap }); // end of last row
+      } else {
+        if (f.h - bh > 0) free.push({ x: f.x, y: f.y + bh, w: f.w, h: f.h - bh });                      // above the block, full width
+        if (last == null) { if (f.w - bw > 0) free.push({ x: f.x + bw, y: f.y, w: f.w - bw, h: bh - gap }); } // beside a staggered block
+        else {
           if (rows > 1 && f.w - bw > 0) free.push({ x: f.x + bw, y: f.y, w: f.w - bw, h: (rows - 1) * p - gap }); // beside the full rows
           if (f.w - last * p > 0) free.push({ x: f.x + last * p, y: f.y + (rows - 1) * p, w: f.w - last * p, h: p - gap }); // beside the last row
         }
-        free = free.filter(g => g.w > eps && g.h > eps);
       }
+      free = free.filter(g => g.w > eps && g.h > eps);
     }
     return { placed, blocks, consumed, area, maxX, maxY, swapped: swap };
   }
@@ -317,7 +379,8 @@ function nestCircles(opts) {
   let totalSheets = 0, error = null, capped = false, iterations = 0;
   while (rem.some(v => v > 0) && totalSheets < maxSheets) {
     if (++iterations > 600) { capped = true; break; }
-    const results = [packSheet(rem, false, false), packSheet(rem, true, false), packSheet(rem, false, true), packSheet(rem, true, true)];
+    const results = [];
+    for (const pat of patterns) for (const [sw, tl] of [[false, false], [true, false], [false, true], [true, true]]) results.push(packSheet(rem, sw, tl, pat));
     const best = results.reduce((b, res) => (better(res, b) ? res : b));
     if (!best.placed.length) { error = 'stuck'; break; }
     // While enough of every size remains, the next sheet comes out identical.
@@ -333,7 +396,15 @@ function nestCircles(opts) {
   const unplaced = rem.reduce((a, v) => a + Math.max(0, v), 0);
   if (unplaced && !error) capped = true;
 
-  const maxPerSheet = sizes.map(s => { const p = s.d + gap; return fitCount(uW, p) * fitCount(uH, p); });
+  const maxPerSheet = sizes.map(s => {
+    const p = s.d + gap; let best = 0;
+    for (const [w, h] of [[uW, uH], [uH, uW]]) {
+      const f = { x: 0, y: 0, w, h };
+      if (layout !== 'stagger') best = Math.max(best, squareFit(f, p).cap);
+      if (layout !== 'square') best = Math.max(best, staggerFit(f, s.d, p).cap);
+    }
+    return best;
+  });
   const totalArea = sizes.reduce((a, s) => a + s.q * Math.PI * s.d * s.d / 4, 0);
   return { sheets, totalSheets, totalArea, maxPerSheet, error, capped, unplaced };
 }
@@ -419,6 +490,7 @@ const state = {
   w: 24, h: 24,
   gap: 2 / 25.4,     // default 2 mm between circles (page starts in inches)
   margin: 10 / 25.4, // default 10 mm from the sheet edge
+  layout: 'best',    // 'best' | 'square' | 'stagger'
   circles: [{ d: 6, q: 12, u: 'in' }, { d: 3, q: 24, u: 'in' }], // each circle keeps its own unit
 };
 
@@ -476,7 +548,7 @@ function buildPresetOptions() {
   els.preset.value = state.preset;
 }
 function syncUnitsUI() {
-  document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.unit === state.unit)));
+  document.querySelectorAll('#unitSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.unit === state.unit)));
   document.querySelectorAll('.controls .group:not(.circles) .unit-in .u').forEach(s => s.textContent = state.unit);
   const s = SLIDER[state.unit];
   els.gap.max = s.gapMax; els.gap.step = s.step; els.margin.max = s.marginMax; els.margin.step = s.step;
@@ -570,7 +642,7 @@ function bindSlider(range, num, key) {
 bindSlider(els.gap, els.gapN, 'gap');
 bindSlider(els.margin, els.marginN, 'margin');
 
-document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+document.querySelectorAll('#unitSeg button').forEach(b => b.addEventListener('click', () => {
   const to = b.dataset.unit; if (to === state.unit) return;
   const f = to === 'mm' ? 25.4 : 1 / 25.4;
   state.unit = to;
@@ -603,7 +675,7 @@ function calculate() {
   const total = sizes.reduce((a, s) => a + s.q, 0);
   if (total > MAX_CIRCLES) { els.results.innerHTML = `<p class="notice">That’s ${count(total)} circles. The calculator handles up to ${count(MAX_CIRCLES)} at a time. Reduce the quantities, or run them in batches.</p>`; return; }
 
-  const res = nestCircles({ W, H, margin, gap, sizes, maxSheets: MAX_SHEETS });
+  const res = nestCircles({ W, H, margin, gap, sizes, maxSheets: MAX_SHEETS, layout: state.layout });
   if (res.error === 'too-big') {
     const names = res.tooBig.map(t => sizes[t].label).join(', ');
     const inner = `${fmt(W - 2 * margin)} × ${fmt(H - 2 * margin)} ${unitName()}`;
@@ -686,6 +758,11 @@ function renderResults(res, sizes, W, H, margin, gap) {
 // "15 × Ø6 in (5 across × 3 up)" for each size's grid block on a sheet.
 function gridParts(sh, sizes) {
   return sh.blocks.map(b => {
+    if (b.stagger) {
+      const lines = sh.swapped ? 'columns' : 'rows', dir = sh.swapped ? 'up' : 'across';
+      const per = b.ce === b.co ? `${b.ce}` : `${b.ce} and ${b.co}`;
+      return `${count(b.n)} × ${sizes[b.t].label} (${b.rows} staggered ${lines} of ${per} ${dir}${b.full ? '' : ', last one partial'})`;
+    }
     const across = sh.swapped ? b.rows : b.cols, up = sh.swapped ? b.cols : b.rows;
     const full = across * up === b.n ? '' : ', last row partial';
     return `${count(b.n)} × ${sizes[b.t].label} (${across} across × ${up} up${full})`;
@@ -729,6 +806,26 @@ $('updateBtn').addEventListener('click', () => location.reload());
 checkForUpdate();
 setInterval(checkForUpdate, 10 * 60 * 1000);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') checkForUpdate(); });
+
+// ---------- layout switch ----------
+const layoutBtns = document.querySelectorAll('#layoutSeg button');
+function syncLayoutUI() { layoutBtns.forEach(b => b.setAttribute('aria-pressed', String(b.dataset.layout === state.layout))); }
+layoutBtns.forEach(b => b.addEventListener('click', () => { state.layout = b.dataset.layout; syncLayoutUI(); schedule(); }));
+syncLayoutUI();
+
+// ---------- collapsible settings panel (remembered per browser) ----------
+function setPanel(open) {
+  document.querySelector('main.layout').classList.toggle('collapsed', !open);
+  $('panelBtn').setAttribute('aria-expanded', String(open));
+  $('panelLbl').textContent = open ? 'Hide settings' : 'Show settings';
+}
+let panelOpen = true;
+try { panelOpen = localStorage.getItem('laserstock.panel') !== 'closed'; } catch {}
+setPanel(panelOpen);
+$('panelBtn').addEventListener('click', () => {
+  panelOpen = !panelOpen; setPanel(panelOpen);
+  try { localStorage.setItem('laserstock.panel', panelOpen ? 'open' : 'closed'); } catch {}
+});
 
 // ---------- init ----------
 buildPresetOptions(); syncUnitsUI(); syncInputs(); renderRows(); calculate();

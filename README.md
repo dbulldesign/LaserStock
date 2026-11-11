@@ -4,9 +4,11 @@ Sheet nesting calculator for laser cutting circles. Enter a stock sheet and the
 circles you need; it works out how many sheets to use and order, and lays the
 circles out in even grids.
 
-Current version: **1.6.0**
+Current version: **1.7.0**
 
 ## Versions
+
+- **1.7.0** — Layout switch: Best fit, Square or Staggered (straight rows, every other row shifted half a circle). Settings panel can be hidden and shown.
 
 - **1.6.0** — Defaults: 10 mm from the sheet edge and 2 mm between circles; spacing shows its mm equivalent in inch mode.
 
