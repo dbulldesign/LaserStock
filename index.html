@@ -201,6 +201,7 @@ table.buy td.order { font-weight: 600; color: var(--accent); }
 .job-card h4 { margin: 0; font-size: 15px; } .job-card p { margin: 0; font-size: 13.5px; color: var(--muted); }
 .job-card .acts { grid-row: 1 / span 2; grid-column: 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 @media (max-width: 600px) { .job-card { grid-template-columns: 1fr; } .job-card .acts { grid-row: auto; grid-column: 1; justify-content: flex-start; } }
+#keyMsg { white-space: pre-line; }
 .syncbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 8px 18px; font-size: 13.5px; background: var(--surface); border-bottom: 1px solid var(--line); color: var(--muted); }
 .syncbar > span:first-child { margin-right: auto; color: var(--ink); }
 .syncbar.error > span:first-child { color: var(--warn-ink); }
@@ -377,7 +378,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
     <p class="notice" id="keyReason" hidden></p>
     <p style="margin-top:0">A key lets this browser change the shared stock. It’s stored only on this device, and every change is saved as a commit under your GitHub name. You need write access to <b>dbulldesign/LaserStock</b>.</p>
     <ol class="steps">
-      <li><b>If you are dbulldesign</b> (the repository owner): open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">new fine-grained token</a>. Name it “LaserStock”, pick an expiry, choose <i>Only select repositories → LaserStock</i>, then under <i>Repository permissions</i> set <b>Contents: Read and write</b>. Generate it.</li>
+      <li><b>If you are dbulldesign</b> (the repository owner): open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">new fine-grained token</a>. Name it “LaserStock” and pick an expiry. Under <i>Repository access</i> change the default <i>Public repositories (read-only)</i> to <b>Only select repositories → LaserStock</b>. Then under <i>Permissions → Repository permissions</i> set <b>Contents</b> to <b>Read and write</b>. Generate it. (Already made one? Open it on <a href="https://github.com/settings/personal-access-tokens" target="_blank" rel="noopener">your tokens page</a>, choose Edit and change the same two settings.)</li>
       <li><b>If you are a collaborator</b>: open <a href="https://github.com/settings/tokens/new?scopes=public_repo&amp;description=LaserStock%20stock" target="_blank" rel="noopener">new classic token</a> (the <b>public_repo</b> box is already ticked), pick an expiry and generate it.</li>
       <li>Copy the key GitHub shows and paste it here.</li>
     </ol>
@@ -391,7 +392,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.14.0';
+const APP_VERSION = '1.14.1';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows at an
@@ -1599,8 +1600,26 @@ function ghError(r) {
   const msg = (r.data && r.data.message) || '';
   if (r.status === 401) return 'GitHub didn’t accept the key. It may have expired or been mistyped; add it again.';
   if (r.status === 403 && /rate limit/i.test(msg)) return 'GitHub’s hourly limit for reading without a key was reached. It resets within the hour; adding a key avoids it.';
-  if (r.status === 403 || r.status === 404) return 'This key can’t change the LaserStock repository. Check it has Contents: Read and write for it.';
+  if (r.status === 403 || r.status === 404) return writeHelp(msg);
   return msg || `GitHub error ${r.status}`;
+}
+// What to do when GitHub refuses a write. New fine-grained keys default to
+// "Public repositories (read-only)", which can read LaserStock but not change it.
+function writeHelp(ghMsg, key = ghKey) {
+  const said = ghMsg ? ` (GitHub says: “${ghMsg}”)` : '';
+  if (/^ghp_/.test(key)) return `GitHub won’t let this key change ${GH.owner}/${GH.repo}${said}.\n\nThis is a classic key: it needs the “public_repo” box ticked, and its GitHub account must be the owner or a collaborator on ${GH.repo}. Edit it at github.com/settings/tokens.`;
+  return `GitHub won’t let this key change ${GH.owner}/${GH.repo}${said}.\n\nFix the key on GitHub (no need to paste it again): open github.com/settings/personal-access-tokens, click the key, then Edit:\n• Repository access → Only select repositories → ${GH.repo}\n• Repository permissions → Contents → Read and write\nSave, then try again.`;
+}
+// Prove a key can write before accepting it: create the stock branch if it is missing,
+// otherwise create and delete a throwaway branch. Nothing else in the repository changes.
+async function testWrite(key) {
+  const main = await gh('@/git/ref/heads/main', {}, key);
+  if (!main.ok) throw new Error(main.status === 401 ? ghError(main) : writeHelp((main.data && main.data.message) || '', key));
+  const has = await gh(`@/git/ref/heads/${GH.branch}`, {}, key);
+  const name = has.ok ? `laserstock-keycheck-${uid()}` : GH.branch;
+  const c = await gh('@/git/refs', { method: 'POST', body: JSON.stringify({ ref: `refs/heads/${name}`, sha: main.data.object.sha }) }, key);
+  if (!c.ok && !(c.status === 422 && name === GH.branch)) throw new Error(c.status === 401 ? ghError(c) : writeHelp((c.data && c.data.message) || '', key));
+  if (name !== GH.branch) await gh(`@/git/refs/heads/${name}`, { method: 'DELETE' }, key);
 }
 async function fetchShared() {
   const r = await gh(`@/contents/${GH.path}?ref=${GH.branch}`);
@@ -1713,6 +1732,8 @@ $('keySave').addEventListener('click', async () => {
     if (!u.ok) throw new Error(ghError(u));
     const repo = await gh('@', {}, k);
     if (repo.ok && repo.data.permissions && !repo.data.permissions.push) throw new Error(`${u.data.login} doesn’t have write access to ${GH.owner}/${GH.repo}. Ask ${GH.owner} to add you as a collaborator.`);
+    $('keyMsg').textContent = 'Checking the key can save changes…';
+    await testWrite(k);
     ghKey = k; sync.user = u.data.login;
     try { localStorage.setItem(KEY_STORE, k); } catch {}
     keyDlg.close(); renderSync(); flash(`Connected as ${u.data.login}`);
