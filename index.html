@@ -149,10 +149,18 @@ input.len.bad { border-color: var(--warn-ink); background: var(--warn-bg); }
 .slider .track { display: grid; grid-template-columns: 1fr 92px; gap: 10px; align-items: center; }
 input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; margin: 0; height: 28px; }
 
-.circ-row { display: grid; grid-template-columns: 14px 1fr 62px 0.8fr 28px; gap: 8px; align-items: center; margin-bottom: 8px; }
-.circ-head { display: grid; grid-template-columns: 14px 1fr 62px 0.8fr 28px; gap: 8px; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.circ-row { display: grid; grid-template-columns: 14px 0.8fr 1fr 62px 28px; gap: 8px; align-items: center; margin-bottom: 8px; }
+.circ-head { display: grid; grid-template-columns: 14px 0.8fr 1fr 62px 28px; gap: 8px; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 .swatch { width: 14px; height: 14px; border-radius: 50%; }
 .circ-row select { padding-left: 6px; padding-right: 4px; min-width: 0; }
+.circ-tag { grid-column: 2 / 5; margin-top: -4px; font-size: 12.5px; color: var(--muted); }
+.size-btns { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.chip { display: inline-flex; align-items: stretch; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--surface); overflow: hidden; font-size: 13.5px; }
+.chip button { border: 0; background: transparent; padding: 5px 10px; cursor: pointer; color: var(--ink); }
+.chip button:hover { background: var(--line); }
+.chip .chip-x { padding: 5px 8px 5px 4px; color: var(--muted); }
+.chip b { font-weight: 600; }
+.chip.add button { color: var(--muted); }
 .circ-row .x { border: 0; background: transparent; color: var(--muted); cursor: pointer; width: 28px; height: 28px; border-radius: 5px; font-size: 18px; line-height: 1; }
 .circ-row .x:hover { background: var(--line); color: var(--ink); }
 .btn { display: inline-block; border: 1px solid var(--line-strong); background: var(--surface); border-radius: 5px; padding: 7px 12px; cursor: pointer; }
@@ -279,7 +287,8 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 
     <section class="group circles">
       <h2>Circles to cut</h2>
-      <div class="circ-head"><span></span><span>Diameter</span><span>Unit</span><span>Quantity</span><span></span></div>
+      <div class="size-btns" id="sizeBtns" aria-label="Preset sizes"></div>
+      <div class="circ-head"><span></span><span>Quantity</span><span>Diameter</span><span>Unit</span><span></span></div>
       <div id="rows"></div>
       <button type="button" class="btn" id="add">Add another size</button>
       <p class="hint">Type a unit with any size to convert it: <b>25mm</b>, <b>2.5cm</b>, <b>1 1/2"</b> or <b>2ft</b>. On a circle it switches that row's unit.</p>
@@ -320,7 +329,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.10.0';
+const APP_VERSION = '1.11.0';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows at an
@@ -518,12 +527,19 @@ function cleanMaterial(m) {
     stock: Math.floor(n(m.stock)), spare: Math.floor(n(m.spare)), reorderAt: Math.floor(n(m.reorderAt)), notes: String(m.notes || '').slice(0, 300) };
 }
 const INV_FORMAT = 2;
-function seedInventory() { return { format: INV_FORMAT, materials: MATERIALS.map(m => cleanMaterial(m)), history: [] }; }
+// Named circle sizes shown as buttons under Circles to cut (e.g. MR16 = 1.9375 in).
+const DEFAULT_SIZES = [{ name: 'MR16', d: 1.9375, u: 'in' }];
+function cleanSizes(list) {
+  if (!Array.isArray(list)) return DEFAULT_SIZES.map(x => ({ ...x }));
+  return list.filter(x => x && typeof x.d === 'number' && x.d > 0 && String(x.name || '').trim())
+    .map(x => ({ name: String(x.name).trim().slice(0, 30), d: x.d, u: x.u === 'mm' ? 'mm' : 'in' }));
+}
+function seedInventory() { return { format: INV_FORMAT, materials: MATERIALS.map(m => cleanMaterial(m)), sizes: cleanSizes(), history: [] }; }
 function loadInventory() {
   try {
     const d = JSON.parse(localStorage.getItem(INV_KEY));
     if (d && Array.isArray(d.materials)) {
-      const out = { format: INV_FORMAT, materials: d.materials.map(cleanMaterial), history: Array.isArray(d.history) ? d.history.slice(0, 500) : [] };
+      const out = { format: INV_FORMAT, materials: d.materials.map(cleanMaterial), sizes: cleanSizes(d.sizes), history: Array.isArray(d.history) ? d.history.slice(0, 500) : [] };
       if ((d.format || 1) < 2) {
         // 1.9.0 had one plain 'Fade Not Poly' and one 'Brightview'. Drop those if they hold no
         // stock, and add the named variants that are missing.
@@ -666,7 +682,7 @@ function markBad(inp, bad) { inp.classList.toggle('bad', bad); inp.setAttribute(
 
 // Circle diameters are shown in the unit they were entered in.
 const fmtU = (v, u) => (u === 'mm' ? Math.round(v * 100) / 100 : Math.round(v * 10000) / 10000).toLocaleString('en-US', { maximumFractionDigits: 4 });
-const diaOf = (c) => 'Ø' + fmtU(c.d, c.u) + ' ' + c.u;
+const diaOf = (c) => (c.name ? `${c.name} (Ø${fmtU(c.d, c.u)} ${c.u})` : 'Ø' + fmtU(c.d, c.u) + ' ' + c.u);
 const toSheetUnit = (v, u) => (u === state.unit ? v : u === 'mm' ? v / 25.4 : v * 25.4);
 
 // ---------- controls ----------
@@ -713,10 +729,10 @@ function renderRows() {
     const row = document.createElement('div'); row.className = 'circ-row';
     row.innerHTML = `
       <span class="swatch" style="background:${COLORS[i % COLORS.length]}"></span>
+      <input type="number" min="0" step="1" aria-label="Quantity of size ${i + 1}" data-i="${i}" data-k="q" value="${c.q}">
       <input class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Diameter of size ${i + 1}" data-i="${i}" data-k="d" value="${fmtU(c.d, c.u)}">
       <select aria-label="Unit for size ${i + 1}" data-i="${i}" data-k="u"><option value="in"${c.u === 'in' ? ' selected' : ''}>in</option><option value="mm"${c.u === 'mm' ? ' selected' : ''}>mm</option></select>
-      <input type="number" min="0" step="1" aria-label="Quantity of size ${i + 1}" data-i="${i}" data-k="q" value="${c.q}">
-      <button type="button" class="x" data-del="${i}" aria-label="Remove size ${i + 1}" title="Remove">×</button>`;
+      <button type="button" class="x" data-del="${i}" aria-label="Remove size ${i + 1}" title="Remove">×</button>${c.name ? `<span class="circ-tag">${esc(c.name)}</span>` : ''}`;
     els.rows.appendChild(row);
   });
 }
@@ -724,7 +740,7 @@ function renderRows() {
 els.rows.addEventListener('input', (e) => {
   const t = e.target; if (!t.dataset.k) return;
   const i = +t.dataset.i;
-  if (t.dataset.k === 'u') { state.circles[i].u = t.value; schedule(); return; } // keep the number, change what it means
+  if (t.dataset.k === 'u') { state.circles[i].u = t.value; dropNameIfChanged(state.circles[i], t.parentElement); schedule(); return; } // keep the number, change what it means
   if (t.dataset.k === 'd') {
     const p = parseLen(t.value);
     if (!p) return; // maybe mid-typing ("25m" on the way to "25mm"); flagged on leaving the field
@@ -732,6 +748,7 @@ els.rows.addEventListener('input', (e) => {
     const c = state.circles[i];
     c.d = p.n > 0 ? p.n : 0;
     if (p.u && p.u !== c.u) { c.u = p.u; t.parentElement.querySelector('select[data-k="u"]').value = p.u; } // "25mm" switches the row to mm
+    dropNameIfChanged(c, t.parentElement);
     schedule(); return;
   }
   const v = parseFloat(t.value);
@@ -754,7 +771,7 @@ els.add.addEventListener('click', () => {
   const d = last ? Math.max(last.d / 2, u === 'mm' ? 10 : 0.5) : (u === 'mm' ? 100 : 4);
   state.circles.push({ d: Math.round(d * 100) / 100, q: 10, u });
   renderRows(); schedule();
-  const inputs = els.rows.querySelectorAll('input[data-k="d"]'); inputs[inputs.length - 1].focus();
+  const inputs = els.rows.querySelectorAll('input[data-k="q"]'); inputs[inputs.length - 1].focus(); inputs[inputs.length - 1].select();
 });
 
 els.preset.addEventListener('change', () => {
@@ -1013,7 +1030,7 @@ function buildJobFile() {
       sheet: { width: state.w, height: state.h },                         // full precision, so reopening
       spacing: { betweenCircles: state.gap, fromEdge: state.margin },     // gives exactly the same layout
       layout: state.layout,
-      circles: state.circles.map(c => ({ diameter: c.d, unit: c.u, quantity: c.q })),
+      circles: state.circles.map(c => ({ diameter: c.d, unit: c.u, quantity: c.q, ...(c.name ? { name: c.name } : {}) })),
     },
   };
   if (lastRender) {
@@ -1066,7 +1083,7 @@ function applyJob(job) {
   const w = num(st.sheet && st.sheet.width, 0), h = num(st.sheet && st.sheet.height, 0);
   if (!w || !h) throw new Error('The file has no sheet size.');
   const circles = Array.isArray(st.circles) ? st.circles.map(c => ({
-    d: num(c.diameter, 0) || 0, u: c.unit === 'mm' ? 'mm' : 'in', q: Math.floor(num(c.quantity, 0) || 0),
+    d: num(c.diameter, 0) || 0, u: c.unit === 'mm' ? 'mm' : 'in', q: Math.floor(num(c.quantity, 0) || 0), name: typeof c.name === 'string' ? c.name.slice(0, 30) : '',
   })) : [];
   state.unit = unit; state.w = w; state.h = h;
   state.gap = num(st.spacing && st.spacing.betweenCircles, 0) ?? state.gap;
@@ -1110,6 +1127,50 @@ document.addEventListener('keydown', (e) => {
   if (k === 's') { e.preventDefault(); saveJob(); }
   if (k === 'o') { e.preventDefault(); $('fileIn').click(); }
 });
+
+// ---------- preset size buttons ----------
+const sizeText = (z) => `${fmtU(z.d, z.u)}${z.u === 'in' ? '"' : ' mm'}`;
+function dropNameIfChanged(c, rowEl) {
+  if (!c.name) return;
+  const z = inv.sizes.find(x => x.name === c.name);
+  if (!z || Math.abs(z.d - c.d) > 1e-9 || z.u !== c.u) { c.name = ''; const tag = rowEl && rowEl.querySelector('.circ-tag'); if (tag) tag.remove(); }
+}
+function renderSizeBtns() {
+  $('sizeBtns').innerHTML = inv.sizes.map((z, k) => `<span class="chip"><button type="button" data-size="${k}" title="Add ${esc(z.name)} circles (${sizeText(z)})"><b>${esc(z.name)}</b> ${sizeText(z)}</button><button type="button" class="chip-x" data-unsize="${k}" aria-label="Remove ${esc(z.name)} from preset sizes" title="Remove preset">×</button></span>`).join('')
+    + `<span class="chip add"><button type="button" id="newSize" title="Save a named size as a button">+ Save a size</button></span>`;
+}
+$('sizeBtns').addEventListener('click', (e) => {
+  const add = e.target.closest('[data-size]'), del = e.target.closest('[data-unsize]');
+  if (add) {
+    const z = inv.sizes[+add.dataset.size];
+    // Already in the list? Go to its quantity; otherwise add a row (filling an empty last row first).
+    let i = state.circles.findIndex(c => c.name === z.name && c.d === z.d && c.u === z.u);
+    if (i < 0) {
+      const last = state.circles[state.circles.length - 1];
+      if (last && !(last.d > 0)) { Object.assign(last, { d: z.d, u: z.u, name: z.name, q: last.q || 10 }); i = state.circles.length - 1; }
+      else { state.circles.push({ d: z.d, u: z.u, q: 10, name: z.name }); i = state.circles.length - 1; }
+      renderRows(); schedule();
+    }
+    const q = els.rows.querySelector(`input[data-i="${i}"][data-k="q"]`); q.focus(); q.select();
+  } else if (del) {
+    const z = inv.sizes[+del.dataset.unsize];
+    if (!confirm(`Remove the ${z.name} (${sizeText(z)}) button?`)) return;
+    inv.sizes.splice(+del.dataset.unsize, 1); saveInventory(); renderSizeBtns();
+  } else if (e.target.closest('#newSize')) {
+    const name = (prompt('Name for the size (e.g. MR16, GU10, PAR20):') || '').trim().slice(0, 30);
+    if (!name) return;
+    const v = prompt(`Diameter of ${name} (e.g. 1.9375", 1 15/16 in or 49mm):`);
+    if (v == null) return;
+    const p = parseLen(v);
+    if (!p || !(p.n > 0)) { alert(`Couldn’t read “${v}” as a size.`); return; }
+    const z = { name, d: p.n, u: p.u || state.unit };
+    const k = inv.sizes.findIndex(x => x.name.toLowerCase() === name.toLowerCase());
+    if (k >= 0) { if (!confirm(`Replace ${inv.sizes[k].name} (${sizeText(inv.sizes[k])}) with ${sizeText(z)}?`)) return; inv.sizes[k] = z; }
+    else inv.sizes.push(z);
+    saveInventory(); renderSizeBtns();
+  }
+});
+renderSizeBtns();
 
 // ---------- material search (Size list) ----------
 $('matSearch').addEventListener('input', () => {
@@ -1301,7 +1362,8 @@ $('invFile').addEventListener('change', async () => {
     const d = JSON.parse(await f.text());
     if (!d || d.app !== 'LaserStock' || d.kind !== 'inventory' || !Array.isArray(d.materials)) throw new Error('This isn’t a LaserStock stock file.');
     if (!confirm(`Replace the materials and stock in this browser with the ${d.materials.length} materials in ${f.name}?`)) return;
-    inv = { materials: d.materials.map(cleanMaterial), history: Array.isArray(d.history) ? d.history.slice(0, 500) : [] };
+    inv = { format: INV_FORMAT, materials: d.materials.map(cleanMaterial), sizes: cleanSizes(d.sizes), history: Array.isArray(d.history) ? d.history.slice(0, 500) : [] };
+    renderSizeBtns();
     invChanged(); renderInv(); flash(`Imported ${f.name}`);
   } catch (e) { alert(`Couldn’t import ${f.name}: ${e instanceof SyntaxError ? 'the file isn’t valid JSON.' : e.message}`); }
 });

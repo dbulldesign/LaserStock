@@ -4,9 +4,11 @@ Sheet nesting calculator for laser cutting circles. Enter a stock sheet and the
 circles you need; it works out how many sheets to use and order, and lays the
 circles out in even grids.
 
-Current version: **1.10.0**
+Current version: **1.11.0**
 
 ## Versions
+
+- **1.11.0** — Preset size buttons (MR16 = 1.9375", save your own); circle rows take the quantity first, then the diameter.
 
 - **1.10.0** — Materials are a type plus a variant (Fade Not Poly - R02, Brightview - Wide…). Adding a variant picks up the type's sheet and cut size. Size list grouped by type with a Find material search; the Stock dialog has its own search. Job files remember the exact material.
 
