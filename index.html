@@ -124,10 +124,11 @@ button, input, select { font: inherit; color: inherit; }
 label.field { display: block; }
 label.field > span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
-select, input[type="number"] {
+select, input[type="number"], input.len {
   width: 100%; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface);
 }
-input[type="number"] { font-variant-numeric: tabular-nums; }
+input[type="number"], input.len { font-variant-numeric: tabular-nums; }
+input.len.bad { border-color: var(--warn-ink); background: var(--warn-bg); }
 .unit-in { position: relative; }
 .unit-in input { padding-right: 36px; }
 .unit-in span { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 13px; pointer-events: none; }
@@ -195,8 +196,8 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
       <h2>Stock sheet</h2>
       <label class="field"><span>Size</span><select id="preset"></select></label>
       <div class="field-row">
-        <label class="field"><span>Width</span><div class="unit-in"><input id="w" type="number" min="0" step="any"><span class="u"></span></div></label>
-        <label class="field"><span>Height</span><div class="unit-in"><input id="h" type="number" min="0" step="any"><span class="u"></span></div></label>
+        <label class="field"><span>Width</span><div class="unit-in"><input id="w" class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false"><span class="u"></span></div></label>
+        <label class="field"><span>Height</span><div class="unit-in"><input id="h" class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false"><span class="u"></span></div></label>
       </div>
     </section>
 
@@ -204,11 +205,11 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
       <h2>Spacing</h2>
       <div class="slider">
         <div class="lbl"><label for="gap">Between circles</label><strong id="gapV"></strong></div>
-        <div class="track"><input type="range" id="gap"><div class="unit-in"><input type="number" id="gapN" min="0" step="any"><span class="u"></span></div></div>
+        <div class="track"><input type="range" id="gap"><div class="unit-in"><input id="gapN" class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Spacing between circles"><span class="u"></span></div></div>
       </div>
       <div class="slider">
         <div class="lbl"><label for="margin">From the sheet edge</label><strong id="marginV"></strong></div>
-        <div class="track"><input type="range" id="margin"><div class="unit-in"><input type="number" id="marginN" min="0" step="any"><span class="u"></span></div></div>
+        <div class="track"><input type="range" id="margin"><div class="unit-in"><input id="marginN" class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Spacing from the sheet edge"><span class="u"></span></div></div>
       </div>
     </section>
 
@@ -217,6 +218,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
       <div class="circ-head"><span></span><span>Diameter</span><span>Unit</span><span>Quantity</span><span></span></div>
       <div id="rows"></div>
       <button type="button" class="btn" id="add">Add another size</button>
+      <p class="hint">Type a unit with any size to convert it: <b>25mm</b>, <b>2.5cm</b>, <b>1 1/2"</b> or <b>2ft</b>. On a circle it switches that row's unit.</p>
       <p class="hint">Each size is cut in an even grid of rows and columns, largest size first. Sheets that come out identical are drawn once.</p>
     </section>
   </aside>
@@ -228,7 +230,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.4.1';
+const APP_VERSION = '1.5.0';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows and
@@ -436,6 +438,31 @@ function fmt(v) {
 const pct = (v) => Math.round(v * 100) + '%';
 const count = (n) => n.toLocaleString('en-US');
 const unitName = () => state.unit;
+// ---------- unit-aware length input ----------
+// Accepts plain numbers, decimals, fractions (1/2, 1 1/2, 1-1/2) and an optional unit:
+// mm, cm, in / inch / " , ft / feet / '. Returns { n, u } with cm folded into mm and feet
+// into inches; u is null when no unit was typed. Returns null if it can't be read.
+const LEN_RE = /^\s*(\d+(?:\.\d*)?|\.\d+)(?:\s*[- ]\s*(\d+)\s*\/\s*(\d+)|\s*\/\s*(\d+))?\s*(mm|millimet(?:er|re)s?|cm|centimet(?:er|re)s?|in|inch|inches|"|''|\u201d|\u201c|\u2033|ft|feet|foot|'|\u2019|\u2018|\u2032)?\.?\s*$/i;
+function parseLen(str) {
+  const m = LEN_RE.exec(String(str));
+  if (!m) return null;
+  let n = parseFloat(m[1]);
+  if (m[4]) { if (+m[4] === 0) return null; n = n / +m[4]; }
+  else if (m[2]) { if (+m[3] === 0) return null; n = n + (+m[2]) / (+m[3]); }
+  const t = (m[5] || '').toLowerCase();
+  if (!t) return { n, u: null };
+  if (t === 'mm' || t.startsWith('millim')) return { n, u: 'mm' };
+  if (t === 'cm' || t.startsWith('centim')) return { n: n * 10, u: 'mm' };
+  if (t === 'ft' || t === 'feet' || t === 'foot' || "'\u2019\u2018\u2032".includes(t)) return { n: n * 12, u: 'in' };
+  return { n, u: 'in' };
+}
+// A typed length in the page's sheet unit (state.unit), or null.
+function lenInSheetUnit(str) {
+  const p = parseLen(str); if (!p) return null;
+  return p.u && p.u !== state.unit ? (p.u === 'mm' ? p.n / 25.4 : p.n * 25.4) : p.n;
+}
+function markBad(inp, bad) { inp.classList.toggle('bad', bad); inp.setAttribute('aria-invalid', String(bad)); }
+
 // Circle diameters are shown in the unit they were entered in.
 const fmtU = (v, u) => (u === 'mm' ? Math.round(v * 100) / 100 : Math.round(v * 10000) / 10000).toLocaleString('en-US', { maximumFractionDigits: 4 });
 const diaOf = (c) => 'Ø' + fmtU(c.d, c.u) + ' ' + c.u;
@@ -468,7 +495,7 @@ function renderRows() {
     const row = document.createElement('div'); row.className = 'circ-row';
     row.innerHTML = `
       <span class="swatch" style="background:${COLORS[i % COLORS.length]}"></span>
-      <input type="number" min="0" step="any" aria-label="Diameter of size ${i + 1}" data-i="${i}" data-k="d" value="${fmtU(c.d, c.u)}">
+      <input class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Diameter of size ${i + 1}" data-i="${i}" data-k="d" value="${fmtU(c.d, c.u)}">
       <select aria-label="Unit for size ${i + 1}" data-i="${i}" data-k="u"><option value="in"${c.u === 'in' ? ' selected' : ''}>in</option><option value="mm"${c.u === 'mm' ? ' selected' : ''}>mm</option></select>
       <input type="number" min="0" step="1" aria-label="Quantity of size ${i + 1}" data-i="${i}" data-k="q" value="${c.q}">
       <button type="button" class="x" data-del="${i}" aria-label="Remove size ${i + 1}" title="Remove">×</button>`;
@@ -480,9 +507,24 @@ els.rows.addEventListener('input', (e) => {
   const t = e.target; if (!t.dataset.k) return;
   const i = +t.dataset.i;
   if (t.dataset.k === 'u') { state.circles[i].u = t.value; schedule(); return; } // keep the number, change what it means
+  if (t.dataset.k === 'd') {
+    const p = parseLen(t.value);
+    if (!p) return; // maybe mid-typing ("25m" on the way to "25mm"); flagged on leaving the field
+    markBad(t, false);
+    const c = state.circles[i];
+    c.d = p.n > 0 ? p.n : 0;
+    if (p.u && p.u !== c.u) { c.u = p.u; t.parentElement.querySelector('select[data-k="u"]').value = p.u; } // "25mm" switches the row to mm
+    schedule(); return;
+  }
   const v = parseFloat(t.value);
-  state.circles[i][t.dataset.k] = t.dataset.k === 'q' ? Math.max(0, Math.floor(v || 0)) : (v > 0 ? v : 0);
+  state.circles[i].q = Math.max(0, Math.floor(v || 0));
   schedule();
+});
+// When the field is left, show the plain number ("1 1/2\"" -> "1.5", unit picker set to in).
+els.rows.addEventListener('change', (e) => {
+  const t = e.target; if (t.dataset.k !== 'd') return;
+  const c = state.circles[+t.dataset.i];
+  if (parseLen(t.value)) { t.value = fmtU(c.d, c.u); markBad(t, false); } else markBad(t, t.value.trim() !== '');
 });
 els.rows.addEventListener('click', (e) => {
   const b = e.target.closest('[data-del]'); if (!b) return;
@@ -502,14 +544,23 @@ els.preset.addEventListener('change', () => {
   state.preset = +els.preset.value;
   const p = presetsFor(state.unit)[state.preset]; state.w = p.w; state.h = p.h; syncInputs(); schedule();
 });
+[els.w, els.h].forEach(inp => inp.addEventListener('change', () => {
+  const k = inp === els.w ? 'w' : 'h';
+  if (lenInSheetUnit(inp.value) != null) inp.value = fmtInput(state[k]); // "610mm" -> "24.0157" when in inches
+  else markBad(inp, inp.value.trim() !== '');
+}));
 [els.w, els.h].forEach(inp => inp.addEventListener('input', () => {
-  state.w = parseFloat(els.w.value) || 0; state.h = parseFloat(els.h.value) || 0;
+  const w = lenInSheetUnit(els.w.value), h = lenInSheetUnit(els.h.value);
+  const v = inp === els.w ? w : h; if (v == null) return;
+  markBad(inp, false);
+  state[inp === els.w ? 'w' : 'h'] = v;
   const match = presetsFor(state.unit).findIndex(p => p.w === state.w && p.h === state.h);
   state.preset = match >= 0 ? match : 'custom'; els.preset.value = state.preset; schedule();
 }));
 function bindSlider(range, num, key) {
   range.addEventListener('input', () => { state[key] = parseFloat(range.value); num.value = fmtInput(state[key]); $(key + 'V').textContent = fmt(state[key]) + ' ' + unitName(); schedule(); });
-  num.addEventListener('input', () => { const v = parseFloat(num.value); state[key] = v >= 0 ? v : 0; range.value = state[key]; $(key + 'V').textContent = fmt(state[key]) + ' ' + unitName(); schedule(); });
+  num.addEventListener('change', () => { if (lenInSheetUnit(num.value) != null) num.value = fmtInput(state[key]); else markBad(num, num.value.trim() !== ''); });
+  num.addEventListener('input', () => { const v = lenInSheetUnit(num.value); if (v == null) return; markBad(num, false); state[key] = v >= 0 ? v : 0; range.value = state[key]; $(key + 'V').textContent = fmt(state[key]) + ' ' + unitName(); schedule(); });
 }
 bindSlider(els.gap, els.gapN, 'gap');
 bindSlider(els.margin, els.marginN, 'margin');
