@@ -155,6 +155,23 @@ input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer;
 .circ-head { display: grid; grid-template-columns: 14px 0.8fr 1fr 62px 28px; gap: 8px; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 .swatch { width: 14px; height: 14px; border-radius: 50%; }
 .circ-row select { padding-left: 6px; padding-right: 4px; min-width: 0; }
+.parts { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.part { display: inline-flex; align-items: stretch; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--surface); overflow: hidden; max-width: 100%; }
+.part button { border: 0; background: transparent; cursor: pointer; padding: 6px 10px; text-align: left; color: var(--ink); font-size: 13.5px; }
+.part .part-x { padding: 6px 8px; color: var(--muted); }
+.part small { display: block; color: var(--muted); font-size: 12px; }
+.part[aria-selected="true"] { border-color: var(--accent); box-shadow: inset 0 -3px 0 var(--accent); }
+.part.add button { color: var(--muted); }
+.jobcard { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; margin: 0 0 20px; max-width: 80ch; }
+.jobcard h3 { margin: 0 0 6px; font-size: 15px; }
+.jobcard table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 0 0 10px; }
+.jobcard th, .jobcard td { text-align: left; padding: 6px 6px; border-bottom: 1px solid var(--line); }
+.jobcard th { color: var(--muted); font-weight: 500; font-size: 12.5px; }
+.jobcard .num { text-align: right; font-variant-numeric: tabular-nums; }
+.jobcard tr.on td { font-weight: 600; }
+.jobcard tr[data-part] { cursor: pointer; } .jobcard tr[data-part]:hover td { background: var(--panel); }
+.jobcard td.order { color: var(--accent); font-weight: 600; }
+.jobcard .acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .circ-tag { grid-column: 2 / 5; margin-top: -4px; font-size: 12.5px; color: var(--muted); }
 .size-btns { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
 .chip { display: inline-flex; align-items: stretch; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--surface); overflow: hidden; font-size: 13.5px; }
@@ -282,7 +299,8 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
       <label class="field"><span>Job name (used for the saved file)</span><input id="jobName" class="len" type="text" autocomplete="off" placeholder="e.g. Lobby pendants, order 1042"></label>
     </section>
     <section class="group">
-      <h2>Stock sheet</h2>
+      <h2>Materials in this job</h2>
+      <div class="parts" id="parts" role="tablist" aria-label="Materials in this job"></div>
       <label class="field"><span>Find material <span id="matCount" class="count"></span></span><input id="matSearch" class="len" type="search" autocomplete="off" placeholder="e.g. R99, brightview wide, 24 x 72"></label>
       <label class="field" style="margin-top:10px"><span>Size</span><select id="preset"></select></label>
       <div class="field-row">
@@ -392,7 +410,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.14.1';
+const APP_VERSION = '1.15.0';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows at an
@@ -599,9 +617,11 @@ function cleanSizes(list) {
 }
 // Planned jobs: saved with the stock so everyone sees what still has to be cut.
 function cleanJobs(list) {
-  return (Array.isArray(list) ? list : []).filter(j => j && j.id && j.settings && typeof j.sheets === 'number').slice(0, 300)
-    .map(j => ({ id: String(j.id), name: String(j.name || 'Untitled job').slice(0, 120), at: j.at, matId: String(j.matId || ''), material: String(j.material || ''),
-      sheets: Math.max(0, Math.floor(j.sheets)), circles: Math.max(0, Math.floor(j.circles || 0)), summary: String(j.summary || '').slice(0, 400), settings: j.settings }));
+  const part = (x) => ({ matId: String(x.matId || ''), material: String(x.material || ''), sheets: Math.max(0, Math.floor(x.sheets || 0)),
+    circles: Math.max(0, Math.floor(x.circles || 0)), summary: String(x.summary || '').slice(0, 400) });
+  return (Array.isArray(list) ? list : []).filter(j => j && j.id && j.settings && (Array.isArray(j.parts) || typeof j.sheets === 'number')).slice(0, 300)
+    .map(j => ({ id: String(j.id), name: String(j.name || 'Untitled job').slice(0, 120), at: j.at,
+      parts: (Array.isArray(j.parts) ? j.parts : [j]).map(part), settings: j.settings }));   // 1.14 jobs had one material
 }
 function seedInventory() { return { format: INV_FORMAT, materials: MATERIALS.map(m => cleanMaterial(m)), sizes: cleanSizes(), jobs: [], history: [] }; }
 function loadInventory() {
@@ -709,6 +729,8 @@ const state = {
   layout: 'best',    // 'best' | 'square' | 'stagger'
   name: '',          // job name, used for the saved file
   jobId: null,       // set when a planned job is open, so it can be updated or marked cut
+  parts: [],         // materials in this job, each with its own circles (the active one is edited live)
+  active: 0,
   circles: [{ d: 6, q: 12, u: 'in' }, { d: 3, q: 24, u: 'in' }], // each circle keeps its own unit
 };
 
@@ -805,8 +827,8 @@ function renderRows() {
     const row = document.createElement('div'); row.className = 'circ-row';
     row.innerHTML = `
       <span class="swatch" style="background:${COLORS[i % COLORS.length]}"></span>
-      <input type="number" min="0" step="1" aria-label="Quantity of size ${i + 1}" data-i="${i}" data-k="q" value="${c.q}">
-      <input class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Diameter of size ${i + 1}" data-i="${i}" data-k="d" value="${fmtU(c.d, c.u)}">
+      <input type="number" min="0" step="1" aria-label="Quantity of size ${i + 1}" data-i="${i}" data-k="q" value="${c.q || ''}">
+      <input class="len" type="text" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Diameter of size ${i + 1}" data-i="${i}" data-k="d" value="${c.d ? fmtU(c.d, c.u) : ''}">
       <select aria-label="Unit for size ${i + 1}" data-i="${i}" data-k="u"><option value="in"${c.u === 'in' ? ' selected' : ''}>in</option><option value="mm"${c.u === 'mm' ? ' selected' : ''}>mm</option></select>
       <button type="button" class="x" data-del="${i}" aria-label="Remove size ${i + 1}" title="Remove">×</button>${c.name ? `<span class="circ-tag">${esc(c.name)}</span>` : ''}`;
     els.rows.appendChild(row);
@@ -912,24 +934,123 @@ function schedule() {
   }, 150);
 }
 
+// ---------- materials in this job (parts) ----------
+// Each part is one material with its own circles. The active part lives in state.w/h/
+// preset/circles while it is edited; the others are stored in state.parts.
+function snapshotPart() {
+  const p = state.preset === 'custom' ? null : presetsFor(state.unit)[state.preset];
+  return { matId: p && p.mat ? p.mat.id : null, preset: p ? p.label : 'Custom size', unit: state.unit, w: state.w, h: state.h, circles: clone(state.circles) };
+}
+const allParts = () => state.parts.map((p, i) => (i === state.active ? snapshotPart() : p));
+function storeActive() { state.parts[state.active] = snapshotPart(); }
+function loadPart(i) {
+  state.active = i;
+  const p = state.parts[i], f = p.unit === state.unit ? 1 : (state.unit === 'mm' ? 25.4 : 1 / 25.4);
+  state.w = roundTo(p.w * f, state.unit); state.h = roundTo(p.h * f, state.unit);
+  state.circles = clone(p.circles);
+  const list = presetsFor(state.unit);
+  let k = p.matId ? list.findIndex(q => q.mat && q.mat.id === p.matId) : -1;
+  if (k >= 0) { state.w = list[k].w; state.h = list[k].h; }
+  else k = list.findIndex(q => q.label === p.preset && q.w === state.w && q.h === state.h);
+  state.preset = k >= 0 ? k : 'custom';
+  $('matSearch').value = '';
+  buildPresetOptions(); syncInputs(); renderRows(); renderParts(); schedule();
+}
+const partMat = (p) => (p.matId ? inv.materials.find(m => m.id === p.matId) : null);
+const partName = (p) => { const m = partMat(p); return m ? m.name : `${p.preset === 'Custom size' ? 'Custom' : p.preset.replace(/ \(.*\)$/, '')} ${p.preset === 'Custom size' ? `${fmtU(p.w, p.unit)} × ${fmtU(p.h, p.unit)} ${p.unit}` : ''}`.trim(); };
+const partCount = (p) => p.circles.reduce((a, c) => a + (c.d > 0 ? c.q : 0), 0);
+function renderParts() {
+  const parts = allParts();
+  $('parts').innerHTML = parts.map((p, i) => `<span class="part" role="tab" aria-selected="${i === state.active}"><button type="button" data-part="${i}">${esc(partName(p))}<small>${count(partCount(p))} circles</small></button>${parts.length > 1 ? `<button type="button" class="part-x" data-unpart="${i}" aria-label="Remove ${esc(partName(p))} from this job" title="Remove from job">×</button>` : ''}</span>`).join('')
+    + `<span class="part add"><button type="button" id="addPart">+ Add material</button></span>`;
+}
+$('parts').addEventListener('click', (e) => {
+  const sel = e.target.closest('[data-part]'), del = e.target.closest('[data-unpart]');
+  if (sel) { const i = +sel.dataset.part; if (i !== state.active) { storeActive(); loadPart(i); } }
+  else if (del) {
+    const i = +del.dataset.unpart, p = allParts()[i];
+    if (partCount(p) && !confirm(`Remove ${partName(p)} and its ${count(partCount(p))} circles from this job?`)) return;
+    storeActive(); state.parts.splice(i, 1);
+    loadPart(Math.min(i <= state.active ? Math.max(0, state.active - 1) : state.active, state.parts.length - 1));
+  } else if (e.target.closest('#addPart')) {
+    // A new material starts with its own empty list of circles.
+    storeActive();
+    const base = snapshotPart();
+    state.parts.push({ ...base, circles: [{ d: 0, q: 0, u: state.circles[0] ? state.circles[0].u : state.unit }] });
+    loadPart(state.parts.length - 1);
+    $('matSearch').focus();
+  }
+});
+
+// Lay out one part on its own (for the job summary, planned jobs and marking cut).
+const partCache = new Map();
+function computePart(p) {
+  const gap = sheetTo(state.gap, p.unit), margin = sheetTo(state.margin, p.unit);
+  const key = JSON.stringify([p.w, p.h, p.unit, p.circles, gap, margin, state.layout]);
+  let out = partCache.get(key);
+  if (!out) {
+    const conv = (c) => (c.u === p.unit ? c.d : c.u === 'mm' ? c.d / 25.4 : c.d * 25.4);
+    const sizes = p.circles.map((c, i) => ({ d: conv(c), q: c.q, i, label: diaOf(c) })).filter(c => c.d > 0 && c.q > 0);
+    const res = sizes.length && p.w > 0 && p.h > 0 ? nestCircles({ W: p.w, H: p.h, margin, gap, sizes, maxSheets: MAX_SHEETS, layout: state.layout }) : null;
+    out = { sizes, res: res && !res.error ? res : null, error: !sizes.length ? 'empty' : res && res.error };
+    if (partCache.size > 200) partCache.clear();
+    partCache.set(key, out);
+  }
+  const m = partMat(p);
+  const n = out.res ? out.res.totalSheets : 0;
+  return { ...out, m, n, placed: n ? out.res.sheets.reduce((a, sh) => a + sh.placed.length * sh.reps, 0) : 0,
+    summary: out.sizes.map(z => `${count(z.q)} × ${z.label}`).join(', ') };
+}
+
+// Summary of every material in the job, with the job's buttons.
+function jobCard() {
+  const parts = allParts(), comp = parts.map(computePart);
+  if (parts.length < 2 && !comp[0].m) return '';
+  let html = '<div class="jobcard">';
+  if (parts.length > 1) {
+    html += `<h3>This job uses ${count(parts.length)} materials</h3><table><thead><tr><th>Material</th><th class="num">Circles</th><th class="num">Laser sheets</th><th class="num">Full sheets</th><th class="num">In stock</th><th class="num">To order</th></tr></thead><tbody>`;
+    comp.forEach((c, i) => {
+      const pl = c.m ? planFor(c.m, c.n) : null;
+      html += `<tr data-part="${i}" class="${i === state.active ? 'on' : ''}"><td>${esc(partName(parts[i]))}</td><td class="num">${count(c.placed || partCount(parts[i]))}</td>
+        <td class="num">${c.res ? count(c.n) : '–'}</td><td class="num">${pl ? count(pl.full) : '–'}</td><td class="num">${c.m ? count(c.m.stock) : '–'}</td>
+        <td class="num ${pl && pl.toOrder ? 'order' : ''}">${pl ? (pl.toOrder ? count(pl.toOrder) : 'Nothing') : (c.m ? '–' : 'not tracked')}</td></tr>`;
+    });
+    html += '</tbody></table>';
+  }
+  const planned = state.jobId && (inv.jobs || []).some(j => j.id === state.jobId);
+  html += `<div class="acts">${planned
+    ? '<button type="button" class="btn primary" data-job="update">Update planned job</button><button type="button" class="btn" data-job="new">Add as new job</button>'
+    : '<button type="button" class="btn primary" data-job="add">Add to jobs</button>'}
+    <button type="button" class="btn" data-job="cut">Mark job as cut…</button></div></div>`;
+  return html;
+}
+function setResults(html) {
+  els.results.innerHTML = jobCard() + html;
+  els.results.querySelectorAll('.jobcard [data-part]').forEach(tr => tr.addEventListener('click', () => { const i = +tr.dataset.part; if (i !== state.active) { storeActive(); loadPart(i); } }));
+  els.results.querySelectorAll('.jobcard [data-job]').forEach(b => b.addEventListener('click', () => {
+    const k = b.dataset.job; if (k === 'cut') markJobCut(); else addToJobs(k === 'new');
+  }));
+}
+
 let lastRender = null; // the most recent good result, written into saved files
 function calculate() {
   lastRender = null;
+  renderParts();
   const W = state.w, H = state.h, margin = state.margin, gap = state.gap;
   const sizes = state.circles.map((c, i) => ({ d: toSheetUnit(c.d, c.u), q: c.q, i, label: diaOf(c) })).filter(c => c.d > 0 && c.q > 0);
-  if (!(W > 0 && H > 0)) { els.results.innerHTML = '<p class="empty">Enter a sheet width and height to start.</p>'; return; }
-  if (!sizes.length) { els.results.innerHTML = '<p class="empty">Add at least one circle size with a quantity above zero.</p>'; return; }
+  if (!(W > 0 && H > 0)) { setResults('<p class="empty">Enter a sheet width and height to start.</p>'); return; }
+  if (!sizes.length) { setResults('<p class="empty">Add at least one circle size with a quantity above zero.</p>'); return; }
   const total = sizes.reduce((a, s) => a + s.q, 0);
-  if (total > MAX_CIRCLES) { els.results.innerHTML = `<p class="notice">That’s ${count(total)} circles. The calculator handles up to ${count(MAX_CIRCLES)} at a time. Reduce the quantities, or run them in batches.</p>`; return; }
+  if (total > MAX_CIRCLES) { setResults(`<p class="notice">That’s ${count(total)} circles. The calculator handles up to ${count(MAX_CIRCLES)} at a time. Reduce the quantities, or run them in batches.</p>`); return; }
 
   const res = nestCircles({ W, H, margin, gap, sizes, maxSheets: MAX_SHEETS, layout: state.layout });
   if (res.error === 'too-big') {
     const names = res.tooBig.map(t => sizes[t].label).join(', ');
     const inner = `${fmt(W - 2 * margin)} × ${fmt(H - 2 * margin)} ${unitName()}`;
-    els.results.innerHTML = `<p class="notice">${names} won’t fit on this sheet. With a ${fmt(margin)} ${unitName()} edge margin the usable area is ${inner}. Use a larger sheet, a smaller circle, or a smaller margin.</p>`;
+    setResults(`<p class="notice">${names} won’t fit on this sheet. With a ${fmt(margin)} ${unitName()} edge margin the usable area is ${inner}. Use a larger sheet, a smaller circle, or a smaller margin.</p>`);
     return;
   }
-  if (res.error) { els.results.innerHTML = `<p class="notice">Couldn’t place these circles. Check the sizes and spacing.</p>`; return; }
+  if (res.error) { setResults(`<p class="notice">Couldn’t place these circles. Check the sizes and spacing.</p>`); return; }
   renderResults(res, sizes, W, H, margin, gap);
 }
 
@@ -975,15 +1096,11 @@ function renderResults(res, sizes, W, H, margin, gap) {
       <div><span>To order</span><b>${order.toOrder ? pl(order.toOrder, ...unitWord) : 'Nothing'}</b></div>
       <p>${order.toOrder ? `Not enough in stock: order ${pl(order.toOrder, 'more ' + unitWord[0], 'more ' + unitWord[1])} of ${esc(m.name)}.` : 'Enough in stock for this job.'}${order.low ? ` This takes ${esc(m.name)} to or below its reorder level of ${count(m.reorderAt)}.` : ''}
     </p>${(() => {
-      const others = plannedFor(m.id, state.jobId), on = others.reduce((a, j) => a + j.sheets, 0);
+      const others = plannedFor(m.id, state.jobId), on = others.reduce((a, x) => a + x.sheets, 0);
       if (!others.length) return '';
       const all = planFor(m, n + on);
       return `<p class="planned">Planned jobs for ${esc(m.name)}: ${pl(others.length, 'other job needs', 'other jobs need')} ${pl(on, order.cut ? 'cut sheet' : 'sheet', order.cut ? 'cut sheets' : 'sheets')}. With this one that’s <b>${pl(all.full, ...unitWord)}</b>: ${all.toOrder ? `order <b>${pl(all.toOrder, ...unitWord)}</b>` : 'enough in stock'}.</p>`;
     })()}
-      <p class="stock-actions">${state.jobId && (inv.jobs || []).some(j => j.id === state.jobId)
-        ? `<button type="button" class="btn primary" id="planBtn">Update planned job</button><button type="button" class="btn" id="planNewBtn">Add as new job</button>`
-        : `<button type="button" class="btn primary" id="planBtn">Add to jobs</button>`}
-      <button type="button" class="btn" id="cutBtn">Mark job as cut…</button></p>
     </div>`;
   }
   let sub = `${count(placedCount)} circles, using ${pct(overall)} of the material overall.`;
@@ -1012,13 +1129,9 @@ function renderResults(res, sizes, W, H, margin, gap) {
   });
   html += '</div>';
   if (res.sheets.length > MAX_DRAWN) html += `<p class="hint">Only the first ${MAX_DRAWN} distinct layouts are drawn.</p>`;
-  els.results.innerHTML = html;
+  setResults(html);
 
-  if (order) {
-    $('cutBtn').addEventListener('click', () => markCut(order));
-    $('planBtn').addEventListener('click', () => addToJobs(false));
-    if ($('planNewBtn')) $('planNewBtn').addEventListener('click', () => addToJobs(true));
-  }
+
   $('copy').addEventListener('click', async () => {
     const lines = [];
     if (state.name) lines.push(state.name);
@@ -1118,7 +1231,8 @@ const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&l
 const round4 = (v) => Math.round(v * 10000) / 10000;
 function flash(msg) { const el = $('fileStatus'); el.textContent = msg; clearTimeout(flash.t); flash.t = setTimeout(() => { el.textContent = ''; }, 4000); }
 
-function buildJobFile() {
+function buildJobFile(withResults = true) {
+  storeActive();
   const presetLabel = state.preset === 'custom' ? 'Custom size' : (presetsFor(state.unit)[state.preset] || {}).label || 'Custom size';
   const job = {
     app: 'LaserStock', format: FILE_FORMAT, appVersion: APP_VERSION, savedAt: new Date().toISOString(),
@@ -1130,8 +1244,15 @@ function buildJobFile() {
       spacing: { betweenCircles: state.gap, fromEdge: state.margin },     // gives exactly the same layout
       layout: state.layout,
       circles: state.circles.map(c => ({ diameter: c.d, unit: c.u, quantity: c.q, ...(c.name ? { name: c.name } : {}) })),
+      // Every material in the job with its own circles (the fields above repeat the open one).
+      parts: state.parts.map(p => ({ material: (partMat(p) || {}).name || null, preset: p.preset, sheet: { width: p.w, height: p.h, unit: p.unit },
+        circles: p.circles.map(c => ({ diameter: c.d, unit: c.u, quantity: c.q, ...(c.name ? { name: c.name } : {}) })) })),
+      active: state.active,
     },
   };
+  if (!withResults) return job;
+  job.materials = state.parts.map(p => { const c = computePart(p); return { material: partName(p), laserSheets: c.n, circles: c.placed,
+    fullSheets: c.m ? planFor(c.m, c.n).full : null, contents: c.summary }; });
   if (lastRender) {
     const { res, sizes, W, H, order, overall, placedCount } = lastRender;
     let idx = 1;
@@ -1175,22 +1296,25 @@ async function saveJob() {
   flash(`Saved ${name}`);
 }
 
-// Save the current job to the planned list (or update the planned job that is open).
+// Save the current job, with every material in it, to the planned list (or update the open one).
 function addToJobs(asNew) {
-  const cm = currentMaterial();
-  if (!cm || !lastRender) { alert('Pick a material from the Size list first, so the job knows which stock it uses.'); return; }
+  const parts = allParts(), comp = parts.map(computePart);
+  const tracked = comp.map((c, i) => ({ c, p: parts[i] })).filter(x => x.c.m && x.c.n);
+  if (!tracked.length) { alert('Pick a material from the Size list first, so the job knows which stock it uses.'); return; }
+  const untracked = comp.map((c, i) => ({ c, p: parts[i] })).filter(x => !x.c.m && x.c.n).map(x => partName(x.p));
+  if (untracked.length && !confirm(`These aren’t stock materials, so they won’t count towards purchasing: ${untracked.join(', ')}. Add the job anyway?`)) return;
   let name = state.name.trim();
   if (!name) {
     name = (prompt('Name for this job (e.g. customer, order number):') || '').trim().slice(0, 120);
     if (!name) return;
     state.name = name; $('jobName').value = name;
   }
-  const { res, sizes, placedCount } = lastRender;
   const id = !asNew && state.jobId ? state.jobId : uid();
-  const job = { id, name, at: new Date().toISOString(), matId: cm.m.id, material: cm.m.name, sheets: res.totalSheets, circles: placedCount,
-    summary: sizes.map(z => `${count(z.q)} × ${z.label}`).join(', '), settings: buildJobFile().settings };
+  const job = { id, name, at: new Date().toISOString(),
+    parts: tracked.map(({ c }) => ({ matId: c.m.id, material: c.m.name, sheets: c.n, circles: c.placed, summary: c.summary })),
+    settings: buildJobFile(false).settings };
   const updating = (inv.jobs || []).some(j => j.id === id);
-  if (!change(`${updating ? 'Update' : 'Plan'} job "${name}": ${job.sheets} sheets of ${cm.m.name}`, d => {
+  if (!change(`${updating ? 'Update' : 'Plan'} job "${name}": ${job.parts.map(x => `${x.sheets} ${x.sheets === 1 ? 'sheet' : 'sheets'} of ${x.material}`).join(', ')}`, d => {
     d.jobs = d.jobs || [];
     const k = d.jobs.findIndex(j => j.id === id);
     if (k >= 0) d.jobs[k] = clone(job); else d.jobs.push(clone(job));
@@ -1203,27 +1327,33 @@ function applyJob(job) {
   if (!job || job.app !== 'LaserStock' || !job.settings) throw new Error('This isn’t a LaserStock job file.');
   const st = job.settings, num = (v, min) => (typeof v === 'number' && isFinite(v) && v >= min ? v : null);
   const unit = st.unit === 'mm' ? 'mm' : 'in';
-  const w = num(st.sheet && st.sheet.width, 0), h = num(st.sheet && st.sheet.height, 0);
-  if (!w || !h) throw new Error('The file has no sheet size.');
-  const circles = Array.isArray(st.circles) ? st.circles.map(c => ({
+  const readCircles = (list) => (Array.isArray(list) ? list.map(c => ({
     d: num(c.diameter, 0) || 0, u: c.unit === 'mm' ? 'mm' : 'in', q: Math.floor(num(c.quantity, 0) || 0), name: typeof c.name === 'string' ? c.name.slice(0, 30) : '',
-  })) : [];
-  state.unit = unit; state.w = w; state.h = h;
+  })) : []);
+  // Files from before 1.15 have one material; newer ones list every material in `parts`.
+  const raw = Array.isArray(st.parts) && st.parts.length ? st.parts
+    : [{ material: st.material, preset: st.preset, sheet: { width: st.sheet && st.sheet.width, height: st.sheet && st.sheet.height, unit }, circles: st.circles }];
+  const parts = raw.map(p => {
+    const w = num(p.sheet && p.sheet.width, 0), h = num(p.sheet && p.sheet.height, 0);
+    if (!w || !h) throw new Error('The file has no sheet size.');
+    const m = p.material ? inv.materials.find(x => x.name === p.material) : null;
+    const circles = readCircles(p.circles);
+    return { matId: m ? m.id : null, preset: p.preset || 'Custom size', unit: p.sheet.unit === 'mm' ? 'mm' : (p.sheet.unit === 'in' ? 'in' : unit), w, h,
+      circles: circles.length ? circles : [{ d: 0, q: 0, u: unit }] };
+  });
+  state.unit = unit;
   state.gap = num(st.spacing && st.spacing.betweenCircles, 0) ?? state.gap;
   state.margin = num(st.spacing && st.spacing.fromEdge, 0) ?? state.margin;
   state.layout = ['best', 'square', 'stagger'].includes(st.layout) ? st.layout : 'best';
-  state.circles = circles.length ? circles : [{ d: unit === 'mm' ? 100 : 4, q: 10, u: unit }];
   state.name = typeof job.name === 'string' ? job.name : '';
   state.jobId = null;
-  const presets = presetsFor(unit);
-  let match = st.material ? presets.findIndex(p => p.mat && p.mat.name === st.material && p.w === w && p.h === h) : -1;
-  if (match < 0) match = presets.findIndex(p => p.label === st.preset && p.w === w && p.h === h);
-  if (match < 0) match = presets.findIndex(p => p.w === w && p.h === h);
-  state.preset = match >= 0 ? match : 'custom';
-  buildPresetOptions(); syncUnitsUI(); syncInputs(); renderRows(); syncLayoutUI();
+  state.parts = parts;
+  syncUnitsUI(); syncLayoutUI();
   $('jobName').value = state.name;
+  loadPart(Math.min(Math.max(0, Math.floor(num(st.active, 0) || 0)), parts.length - 1));
   calculate();
 }
+
 async function openJobFile(file) {
   try {
     applyJob(JSON.parse(await file.text()));
@@ -1498,19 +1628,28 @@ function cutInto(d, matId, n, note, en, jobId) {
   x.stock = pl.after.stock; x.spare = pl.after.spare;
   if (jobId) d.jobs = (d.jobs || []).filter(j => j.id !== jobId);
 }
-const plannedFor = (matId, exceptId) => (inv.jobs || []).filter(j => j.matId === matId && j.id !== exceptId);
+// Planned demand for a material from other jobs: one entry per job part that uses it.
+const plannedFor = (matId, exceptId) => (inv.jobs || []).filter(j => j.id !== exceptId).flatMap(j => j.parts.filter(p => p.matId === matId));
 
-// Take a finished job out of stock.
-function markCut(order) {
-  const m = order.m;
-  const parts = [`${count(order.full)} ${order.cut ? 'full ' : ''}${order.full === 1 ? 'sheet' : 'sheets'}`];
-  if (order.fromSpare) parts.push(`${count(order.fromSpare)} spare cut ${order.fromSpare === 1 ? 'piece' : 'pieces'}`);
-  let msg = `Take ${parts.join(' and ')} of ${m.name} out of stock${order.spare ? `, and add ${count(order.spare)} new spare cut ${order.spare === 1 ? 'piece' : 'pieces'}` : ''}?`;
-  if (order.full > m.stock) msg += `\n\nStock only shows ${count(m.stock)}, so it will go to 0.`;
+// Take a finished job out of stock: every material in it.
+function markJobCut() {
+  const parts = allParts(), comp = parts.map(computePart);
+  const cuts = comp.map((c, i) => ({ c, p: parts[i] })).filter(x => x.c.m && x.c.n);
+  const skipped = comp.map((c, i) => ({ c, p: parts[i] })).filter(x => !x.c.m && x.c.n).map(x => partName(x.p));
+  if (!cuts.length) { alert('None of the materials in this job are tracked in stock. Pick materials from the Size list.'); return; }
+  const lines = cuts.map(({ c }) => {
+    const pl = planFor(c.m, c.n), bits = [`${count(pl.full)} ${c.m.cut ? 'full ' : ''}${pl.full === 1 ? 'sheet' : 'sheets'}`];
+    if (pl.fromSpare) bits.push(`${count(pl.fromSpare)} spare cut ${pl.fromSpare === 1 ? 'piece' : 'pieces'}`);
+    return `• ${c.m.name}: ${bits.join(' and ')}${pl.newSpare ? ` (adds ${count(pl.newSpare)} new spare)` : ''}${pl.full > c.m.stock ? ` — stock only shows ${count(c.m.stock)}, goes to 0` : ''}`;
+  });
+  let msg = `Take this job out of stock?\n\n${lines.join('\n')}`;
+  if (skipped.length) msg += `\n\nNot tracked in stock, so skipped: ${skipped.join(', ')}.`;
   if (!confirm(msg)) return;
-  const id = m.id, en = entry(), note = `${count(order.used)} ${order.cut ? 'cut ' : ''}sheets used`, jobId = state.jobId;
-  const ok = change(`Cut job${en.job ? ` "${en.job}"` : ''}: ${note} of ${m.name}`, d => cutInto(d, id, order.used, note, en, jobId));
-  if (ok) { if (jobId) state.jobId = null; flash(`Took the job out of ${m.name} stock`); }
+  const en = entry(), jobId = state.jobId;
+  const ok = change(`Cut job${en.job ? ` "${en.job}"` : ''}: ${cuts.map(({ c }) => `${c.n} ${c.n === 1 ? 'sheet' : 'sheets'} of ${c.m.name}`).join(', ')}`, d => {
+    cuts.forEach(({ c }, k) => cutInto(d, c.m.id, c.n, `${count(c.n)} ${c.m.cut ? 'cut ' : ''}sheets used`, { ...en, id: en.id + k }, k === cuts.length - 1 ? jobId : null));
+  });
+  if (ok) { if (jobId) state.jobId = null; flash('Took the job out of stock'); }
 }
 
 // ---------- planned jobs & purchasing ----------
@@ -1520,7 +1659,7 @@ $('incReorder').checked = incReorder;
 $('incReorder').addEventListener('change', () => { incReorder = $('incReorder').checked; try { localStorage.setItem('laserstock.incReorder', incReorder ? '1' : '0'); } catch {} renderJobs(); });
 function buyRows() {
   const by = new Map();
-  for (const j of inv.jobs || []) { const m = inv.materials.find(x => x.id === j.matId); if (!m) continue; const e = by.get(m.id) || { m, jobs: 0, n: 0 }; e.jobs++; e.n += j.sheets; by.set(m.id, e); }
+  for (const j of inv.jobs || []) for (const p of j.parts) { const m = inv.materials.find(x => x.id === p.matId); if (!m) continue; const e = by.get(m.id) || { m, jobs: 0, n: 0 }; e.jobs++; e.n += p.sheets; by.set(m.id, e); }
   if (incReorder) for (const m of inv.materials) if (m.reorderAt > 0 && !by.has(m.id) && m.stock < m.reorderAt) by.set(m.id, { m, jobs: 0, n: 0 });
   return [...by.values()].map(e => ({ ...e, plan: planFor(e.m, e.n) })).map(e => ({ ...e, buy: incReorder ? e.plan.toReorder : e.plan.toOrder }));
 }
@@ -1535,10 +1674,13 @@ function renderJobs() {
     <td class="num ${e.buy ? 'order' : ''}">${e.buy ? unitW(e.m, e.buy) : 'Nothing'}</td></tr>`).join('')}</tbody></table>`
     : '<p class="empty">No planned jobs yet, so nothing to buy.</p>';
   $('jobList').innerHTML = jobs.length ? jobs.map(j => {
-    const m = inv.materials.find(x => x.id === j.matId);
-    return `<div class="job-card"><h4>${esc(j.name)}</h4>
-      <div class="acts"><button type="button" class="btn" data-job-open="${esc(j.id)}">Open</button><button type="button" class="btn" data-job-cut="${esc(j.id)}"${m ? '' : ' disabled'}>Mark as cut…</button><button type="button" class="btn" data-job-del="${esc(j.id)}">Remove</button></div>
-      <p>${esc(m ? m.name : `${j.material} (no longer in the list)`)} · <b>${count(j.sheets)} ${m && m.cut ? 'cut ' : ''}${j.sheets === 1 ? 'sheet' : 'sheets'}</b> · ${count(j.circles)} circles${j.summary ? ` (${esc(j.summary)})` : ''} · added ${new Date(j.at).toLocaleDateString(undefined, { dateStyle: 'medium' })}</p></div>`;
+    const lines = j.parts.map(p => {
+      const m = inv.materials.find(x => x.id === p.matId);
+      return `<p>${esc(m ? m.name : `${p.material} (no longer in the list)`)} · <b>${count(p.sheets)} ${m && m.cut ? 'cut ' : ''}${p.sheets === 1 ? 'sheet' : 'sheets'}</b> · ${count(p.circles)} circles${p.summary ? ` (${esc(p.summary)})` : ''}</p>`;
+    }).join('');
+    return `<div class="job-card"><h4>${esc(j.name)} <small class="hint">· added ${new Date(j.at).toLocaleDateString(undefined, { dateStyle: 'medium' })}</small></h4>
+      <div class="acts"><button type="button" class="btn" data-job-open="${esc(j.id)}">Open</button><button type="button" class="btn" data-job-cut="${esc(j.id)}">Mark as cut…</button><button type="button" class="btn" data-job-del="${esc(j.id)}">Remove</button></div>
+      <div>${lines}</div></div>`;
   }).join('') : '<p class="empty">No planned jobs.</p>';
 }
 function updateJobsBadge() { const n = (inv.jobs || []).length, b = $('jobsBadge'); b.hidden = !n; b.textContent = n; }
@@ -1551,14 +1693,14 @@ $('jobList').addEventListener('click', (e) => {
     try { applyJob({ app: 'LaserStock', name: j.name, settings: j.settings }); state.jobId = j.id; calculate(); jobsDlg.close(); flash(`Opened planned job “${j.name}”`); }
     catch (err) { alert(`Couldn’t open that job: ${err.message}`); }
   } else if (b.dataset.jobCut) {
-    const m = inv.materials.find(x => x.id === j.matId), pl = planFor(m, j.sheets);
-    const parts = [`${count(pl.full)} ${m.cut ? 'full ' : ''}${pl.full === 1 ? 'sheet' : 'sheets'}`];
-    if (pl.fromSpare) parts.push(`${count(pl.fromSpare)} spare cut ${pl.fromSpare === 1 ? 'piece' : 'pieces'}`);
-    let msg = `Mark “${j.name}” as cut? This takes ${parts.join(' and ')} of ${m.name} out of stock${pl.newSpare ? ` and adds ${count(pl.newSpare)} new spare cut ${pl.newSpare === 1 ? 'piece' : 'pieces'}` : ''}, and removes the job from the list.`;
-    if (pl.full > m.stock) msg += `\n\nStock only shows ${count(m.stock)}, so it will go to 0.`;
-    if (!confirm(msg)) return;
-    const en = { ...entry(), job: j.name }, note = `${count(j.sheets)} ${m.cut ? 'cut ' : ''}sheets used`;
-    if (change(`Cut job "${j.name}": ${note} of ${m.name}`, d => cutInto(d, j.matId, j.sheets, note, en, j.id))) { if (state.jobId === j.id) state.jobId = null; flash(`Marked “${j.name}” as cut`); }
+    const cuts = j.parts.map(p => ({ p, m: inv.materials.find(x => x.id === p.matId) })).filter(x => x.m && x.p.sheets);
+    if (!cuts.length) { alert('None of this job’s materials are in the stock list any more.'); return; }
+    const lines = cuts.map(({ p, m }) => { const pl = planFor(m, p.sheets); return `• ${m.name}: ${count(pl.full)} ${m.cut ? 'full ' : ''}${pl.full === 1 ? 'sheet' : 'sheets'}${pl.fromSpare ? ` and ${count(pl.fromSpare)} spare cut pieces` : ''}${pl.full > m.stock ? ` — stock only shows ${count(m.stock)}, goes to 0` : ''}`; });
+    if (!confirm(`Mark “${j.name}” as cut? This takes out of stock:\n\n${lines.join('\n')}\n\nand removes the job from the list.`)) return;
+    const en = { ...entry(), job: j.name };
+    if (change(`Cut job "${j.name}": ${cuts.map(({ p, m }) => `${p.sheets} ${p.sheets === 1 ? 'sheet' : 'sheets'} of ${m.name}`).join(', ')}`, d => {
+      cuts.forEach(({ p, m }, k) => cutInto(d, m.id, p.sheets, `${count(p.sheets)} ${m.cut ? 'cut ' : ''}sheets used`, { ...en, id: en.id + k }, k === cuts.length - 1 ? j.id : null));
+    })) { if (state.jobId === j.id) state.jobId = null; flash(`Marked “${j.name}” as cut`); }
   } else if (b.dataset.jobDel) {
     if (!confirm(`Remove “${j.name}” from planned jobs? Stock isn’t changed.`)) return;
     if (change(`Remove planned job "${j.name}"`, d => { d.jobs = (d.jobs || []).filter(x => x.id !== id); }) && state.jobId === id) state.jobId = null;
@@ -1763,6 +1905,7 @@ $('invFile').addEventListener('change', async () => {
 
 // ---------- init ----------
 { const p0 = presetsFor(state.unit)[0]; if (p0) { state.w = p0.w; state.h = p0.h; } else state.preset = 'custom'; }
+state.parts = [snapshotPart()]; state.active = 0;
 updateLowBadge(); updateJobsBadge();
 renderSync(); refreshShared(true);
 if (ghKey) gh('/user').then(u => { if (u.ok) { sync.user = u.data.login; renderSync(); } });
