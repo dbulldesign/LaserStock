@@ -185,6 +185,14 @@ dialog.dlg { width: min(860px, calc(100% - 24px)); max-height: calc(100vh - 32px
 dialog.dlg::backdrop { background: rgba(0, 0, 0, .45); }
 .dlg-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 18px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .dlg-head h2 { margin: 0 auto 0 0; font-size: 18px; }
+.dlg-top { position: sticky; top: 0; z-index: 1; }
+.dlg-top .dlg-head { position: static; }
+.syncbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; padding: 8px 18px; font-size: 13.5px; background: var(--surface); border-bottom: 1px solid var(--line); color: var(--muted); }
+.syncbar > span:first-child { margin-right: auto; color: var(--ink); }
+.syncbar.error > span:first-child { color: var(--warn-ink); }
+.syncbar.none > span:first-child { color: var(--warn-ink); }
+.linkbtn { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; font: inherit; }
+ol.steps { padding-left: 20px; } ol.steps li { margin-bottom: 8px; }
 .dlg-body { padding: 14px 18px 22px; }
 .add-form { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) auto; gap: 8px 12px; align-items: end; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; margin: 0 0 14px; }
 .add-form label > span { display: block; color: var(--muted); font-size: 12.5px; margin-bottom: 3px; }
@@ -304,6 +312,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 </main>
 
 <dialog class="dlg" id="stockDlg" aria-labelledby="stockTitle">
+  <div class="dlg-top">
   <div class="dlg-head">
     <h2 id="stockTitle">Materials &amp; stock</h2>
     <button type="button" class="btn" id="addMat">Add material</button>
@@ -312,8 +321,10 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
     <input type="file" id="invFile" accept=".json,application/json" hidden>
     <button type="button" class="btn primary" id="stockClose">Done</button>
   </div>
+  <div class="syncbar" id="syncBar"></div>
+  </div>
   <div class="dlg-body">
-    <p class="hint" style="margin-top:0">Each material appears in the Size list. Stock counts are saved in this browser; use Export to back them up or move them to another computer. “Cut to” is the piece size that goes in the laser; leave it blank if sheets go in whole.</p>
+    <p class="hint" style="margin-top:0">Each material appears in the Size list. Stock is shared through GitHub, so everyone sees the same counts; changing it needs a GitHub key. Export saves a backup file. “Cut to” is the piece size that goes in the laser; leave it blank if sheets go in whole.</p>
     <div class="add-form" id="addForm">
       <label><span>Type</span><select id="addType"></select></label>
       <label id="newTypeWrap" hidden><span>New type name</span><input id="newType" placeholder="e.g. Clear acrylic 3 mm"></label>
@@ -329,11 +340,27 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
   </div>
 </dialog>
 
+<dialog class="dlg" id="keyDlg" aria-labelledby="keyTitle" style="width:min(600px, calc(100% - 24px))">
+  <div class="dlg-head"><h2 id="keyTitle">Add your GitHub key</h2></div>
+  <div class="dlg-body">
+    <p class="notice" id="keyReason" hidden></p>
+    <p style="margin-top:0">A key lets this browser change the shared stock. It’s stored only on this device, and every change is saved as a commit under your GitHub name. You need write access to <b>dbulldesign/LaserStock</b>.</p>
+    <ol class="steps">
+      <li><b>If you are dbulldesign</b> (the repository owner): open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">new fine-grained token</a>. Name it “LaserStock”, pick an expiry, choose <i>Only select repositories → LaserStock</i>, then under <i>Repository permissions</i> set <b>Contents: Read and write</b>. Generate it.</li>
+      <li><b>If you are a collaborator</b>: open <a href="https://github.com/settings/tokens/new?scopes=public_repo&amp;description=LaserStock%20stock" target="_blank" rel="noopener">new classic token</a> (the <b>public_repo</b> box is already ticked), pick an expiry and generate it.</li>
+      <li>Copy the key GitHub shows and paste it here.</li>
+    </ol>
+    <label class="field"><span>GitHub key</span><input id="keyIn" class="len" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_… or ghp_…"></label>
+    <p class="hint" id="keyMsg" role="status"></p>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px"><button type="button" class="btn" id="keyCancel">Cancel</button><button type="button" class="btn primary" id="keySave">Save key</button></div>
+  </div>
+</dialog>
+
 <script>
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.12.0';
+const APP_VERSION = '1.13.0';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows at an
@@ -560,10 +587,13 @@ function saveInventory() {
   try { localStorage.setItem(INV_KEY, JSON.stringify(inv)); return true; }
   catch { flash('Couldn’t save stock in this browser (private window?). Export a backup instead.'); return false; }
 }
-function logStock(m, full, spare, type, note) {
-  inv.history.unshift({ id: uid(), at: new Date().toISOString(), type, matId: m.id, material: m.name, full, spare, job: state.name || '', note: note || '' });
-  inv.history.length = Math.min(inv.history.length, 500);
+// Add a history entry to a copy of the stock data. id/at/job are fixed by the caller so the
+// same entry is written whether the change is applied locally or to the shared copy.
+function logStock(d, m, full, spare, type, note, e) {
+  d.history.unshift({ id: e.id, at: e.at, type, matId: m.id, material: m.name, full, spare, job: e.job, note: note || '' });
+  d.history.length = Math.min(d.history.length, 500);
 }
+const entry = () => ({ id: uid(), at: new Date().toISOString(), job: state.name || '' });
 
 // Generic sheet sizes listed after the named materials.
 const GENERIC = {
@@ -1172,7 +1202,7 @@ $('sizeBtns').addEventListener('click', (e) => {
   } else if (del) {
     const z = inv.sizes[+del.dataset.unsize];
     if (!confirm(`Remove the ${z.name} (${sizeText(z)}) button?`)) return;
-    inv.sizes.splice(+del.dataset.unsize, 1); saveInventory(); renderSizeBtns();
+    change(`Remove size ${z.name}`, d => { d.sizes = d.sizes.filter(x => x.name !== z.name); });
   } else if (e.target.closest('#newSize')) {
     const name = (prompt('Name for the size (e.g. MR16, GU10, PAR20):') || '').trim().slice(0, 30);
     if (!name) return;
@@ -1182,9 +1212,11 @@ $('sizeBtns').addEventListener('click', (e) => {
     if (!p || !(p.n > 0)) { alert(`Couldn’t read “${v}” as a size.`); return; }
     const z = { name, d: p.n, u: p.u || state.unit };
     const k = inv.sizes.findIndex(x => x.name.toLowerCase() === name.toLowerCase());
-    if (k >= 0) { if (!confirm(`Replace ${inv.sizes[k].name} (${sizeText(inv.sizes[k])}) with ${sizeText(z)}?`)) return; inv.sizes[k] = z; }
-    else inv.sizes.push(z);
-    saveInventory(); renderSizeBtns();
+    if (k >= 0 && !confirm(`Replace ${inv.sizes[k].name} (${sizeText(inv.sizes[k])}) with ${sizeText(z)}?`)) return;
+    change(`Save size ${name} = ${sizeText(z)}`, d => {
+      const j = d.sizes.findIndex(x => x.name.toLowerCase() === name.toLowerCase());
+      if (j >= 0) d.sizes[j] = { ...z }; else d.sizes.push({ ...z });
+    });
   }
 });
 renderSizeBtns();
@@ -1210,7 +1242,7 @@ function refreshPresets() {
   const before = state.preset === 'custom' ? null : (presetsFor(state.unit)[state.preset] || {}).mat;
   const list = presetsFor(state.unit);
   if (before) {
-    const i = list.findIndex(p => p.mat === before);
+    const i = list.findIndex(p => p.mat && p.mat.id === before.id);
     if (i >= 0) { state.preset = i; state.w = list[i].w; state.h = list[i].h; } else state.preset = 'custom';
   } else if (state.preset !== 'custom') {
     const i = list.findIndex(p => p.w === state.w && p.h === state.h); state.preset = i >= 0 ? i : 'custom';
@@ -1256,7 +1288,13 @@ function renderInv() {
     <td>${inv.materials.some(m => m.id === h.matId) ? `<button type="button" class="btn" data-undo="${h.id}">Undo</button>` : ''}</td></tr>`).join('')}</tbody></table>`
     : '<p class="empty">Nothing yet. Received sheets, stock edits and jobs marked as cut show up here.</p>';
 }
-function invChanged() { saveInventory(); refreshPresets(); schedule(); }
+// Redraw everything that shows stock after it changes (locally or from the shared copy).
+function afterInv() {
+  saveInventory(); refreshPresets(); renderSizeBtns();
+  const a = document.activeElement, typing = dlg.open && a && dlg.contains(a) && /^(INPUT|SELECT)$/.test(a.tagName);
+  if (dlg.open && !typing) renderInv();
+  schedule();
+}
 
 $('stockBtn').addEventListener('click', () => openStock(false));
 $('stockClose').addEventListener('click', () => dlg.close());
@@ -1291,13 +1329,16 @@ function addMaterial() {
   const sz = (!isNew && sizeOfType(type)) || { w: 24, h: 48, unit: 'in', cut: null };
   // Keep each type together in the list.
   const m = cleanMaterial({ type, variant, ...sz });
-  let at = -1; inv.materials.forEach((x, i) => { if (x.type === type) at = i; });
-  inv.materials.splice(at >= 0 ? at + 1 : inv.materials.length, 0, m);
+  if (!change(`Add material ${name}`, d => {
+    if (d.materials.some(x => x.name === name)) return;
+    let at = -1; d.materials.forEach((x, i) => { if (x.type === type) at = i; });
+    d.materials.splice(at >= 0 ? at + 1 : d.materials.length, 0, { ...m, cut: m.cut && { ...m.cut } });
+  })) return;
   $('addVariant').value = ''; $('newType').value = '';
   if (isNew) $('addType').value = type;
-  invChanged(); $('dlgSearch').value = ''; renderInv();
+  $('dlgSearch').value = ''; renderInv();
   flash(`Added ${name}`);
-  const card = $('matList').querySelector(`.mat-card[data-m="${inv.materials.indexOf(m)}"]`);
+  const card = $('matList').querySelector(`.mat-card[data-m="${inv.materials.findIndex(x => x.id === m.id)}"]`);
   if (card) { card.scrollIntoView({ block: 'nearest' }); card.classList.add('flash'); }
 }
 $('addMatBtn').addEventListener('click', addMaterial);
@@ -1305,49 +1346,61 @@ $('addVariant').addEventListener('keydown', (e) => { if (e.key === 'Enter') addM
 $('newType').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('addVariant').focus(); });
 $('dlgSearch').addEventListener('input', renderInv);
 $('addMat').addEventListener('click', () => { $('addVariant').focus(); });
-function openStock(focusAdd) { renderInv(); dlg.showModal(); if (focusAdd) $('addVariant').focus(); }
+function openStock(focusAdd) { renderInv(); renderSync(); dlg.showModal(); if (focusAdd) $('addVariant').focus(); refreshShared(false); }
 $('matList').addEventListener('change', (e) => {
   const card = e.target.closest('.mat-card'), f = e.target.dataset.f; if (!card || !f) return;
-  const m = inv.materials[+card.dataset.m], v = e.target.value;
+  const m = inv.materials[+card.dataset.m], v = e.target.value, id = m.id, en = entry();
+  const find = (d) => d.materials.find(x => x.id === id);
+  let op, label = `Edit ${m.name}`;
   if (f === 'type' || f === 'variant') {
     const nt = f === 'type' ? (v.trim().slice(0, 60) || m.type) : m.type, nv = f === 'variant' ? v.trim().slice(0, 60) : m.variant;
     const nn = nv ? `${nt} - ${nv}` : nt;
-    if (inv.materials.some(x => x !== m && x.name === nn)) { alert(`${nn} is already in the list.`); renderInv(); return; }
-    m.type = nt; m.variant = nv; m.name = nn;
-  }
-  else if (f === 'notes') m.notes = v.slice(0, 300);
-  else if (f === 'unit') m.unit = v === 'mm' ? 'mm' : 'in';
-  else if (f === 'w' || f === 'h') m[f] = numOr(v, m[f]) || m[f];
+    if (inv.materials.some(x => x.id !== id && x.name === nn)) { alert(`${nn} is already in the list.`); renderInv(); return; }
+    label = `Rename ${m.name} to ${nn}`;
+    op = d => { const x = find(d); if (x && !d.materials.some(y => y.id !== id && y.name === nn)) { x.type = nt; x.variant = nv; x.name = nn; } };
+  } else if (f === 'notes') { const nv = v.slice(0, 300); op = d => { const x = find(d); if (x) x.notes = nv; }; }
+  else if (f === 'unit') { const nv = v === 'mm' ? 'mm' : 'in'; op = d => { const x = find(d); if (x) x.unit = nv; }; }
+  else if (f === 'w' || f === 'h') { const nv = numOr(v, m[f]) || m[f]; op = d => { const x = find(d); if (x) x[f] = nv; }; }
   else if (f === 'cw' || f === 'ch') {
-    const card2 = e.target.closest('.mat-card'), cw = numOr(card2.querySelector('[data-f="cw"]').value, 0), ch = numOr(card2.querySelector('[data-f="ch"]').value, 0);
-    m.cut = cw > 0 && ch > 0 ? { w: cw, h: ch } : null;
-    if (!m.cut) m.spare = 0;
+    const cw = numOr(card.querySelector('[data-f="cw"]').value, 0), ch = numOr(card.querySelector('[data-f="ch"]').value, 0);
+    const cut = cw > 0 && ch > 0 ? { w: cw, h: ch } : null;
+    op = d => { const x = find(d); if (x) { x.cut = cut && { ...cut }; if (!cut) x.spare = 0; } };
   } else if (f === 'stock' || f === 'spare') {
+    // Counts are set to what was typed; history records the difference from the shared value.
     const nv = Math.floor(numOr(v, m[f]));
-    if (nv !== m[f]) { logStock(m, f === 'stock' ? nv - m.stock : 0, f === 'spare' ? nv - m.spare : 0, 'adjust', 'Edited count'); m[f] = nv; }
-  } else if (f === 'reorderAt') m.reorderAt = Math.floor(numOr(v, m.reorderAt));
-  invChanged(); renderInv();
+    if (nv === m[f]) return;
+    label = `Set ${m.name} ${f === 'stock' ? 'stock' : 'spare pieces'} to ${nv}`;
+    op = d => { const x = find(d); if (!x || x[f] === nv) return; logStock(d, x, f === 'stock' ? nv - x.stock : 0, f === 'spare' ? nv - x.spare : 0, 'adjust', 'Edited count', en); x[f] = nv; };
+  } else if (f === 'reorderAt') { const nv = Math.floor(numOr(v, m.reorderAt)); op = d => { const x = find(d); if (x) x.reorderAt = nv; }; }
+  else return;
+  if (!change(label, op)) { renderInv(); return; }
+  renderInv();
 });
 $('matList').addEventListener('click', (e) => {
   const b = e.target.closest('[data-act]'); if (!b) return;
-  const m = inv.materials[+b.closest('.mat-card').dataset.m];
+  const m = inv.materials[+b.closest('.mat-card').dataset.m], id = m.id;
   if (b.dataset.act === 'delete') {
     if (!confirm(`Delete ${m.name}? Its stock count goes with it (history entries stay).`)) return;
-    inv.materials.splice(inv.materials.indexOf(m), 1);
+    change(`Delete ${m.name}`, d => { d.materials = d.materials.filter(x => x.id !== id); });
   } else {
     const k = Math.floor(numOr(prompt(`How many ${m.cut ? 'full sheets' : 'sheets'} of ${m.name} came in?`, '1'), 0));
     if (!k) return;
-    m.stock += k; logStock(m, k, 0, 'receive', '');
+    const en = entry();
+    change(`Receive ${k} ${m.name}`, d => { const x = d.materials.find(y => y.id === id); if (x) { x.stock += k; logStock(d, x, k, 0, 'receive', '', en); } });
   }
-  invChanged(); renderInv();
+  renderInv();
 });
 $('histList').addEventListener('click', (e) => {
   const b = e.target.closest('[data-undo]'); if (!b) return;
   const h = inv.history.find(x => x.id === b.dataset.undo), m = h && inv.materials.find(x => x.id === h.matId); if (!m) return;
   if (!confirm(`Undo “${h.type === 'cut' ? 'Cut' : h.type === 'receive' ? 'Received' : 'Adjusted'} ${changeTxt(h)}” on ${m.name}?`)) return;
-  m.stock = Math.max(0, m.stock - h.full); m.spare = Math.max(0, m.spare - h.spare);
-  inv.history.splice(inv.history.indexOf(h), 1);
-  invChanged(); renderInv();
+  const hid = h.id;
+  change(`Undo ${h.type} ${changeTxt(h)} on ${m.name}`, d => {
+    const hh = d.history.find(x => x.id === hid), x = hh && d.materials.find(y => y.id === hh.matId); if (!x) return;
+    x.stock = Math.max(0, x.stock - hh.full); x.spare = Math.max(0, x.spare - hh.spare);
+    d.history.splice(d.history.indexOf(hh), 1);
+  });
+  renderInv();
 });
 
 // Take a finished job out of stock.
@@ -1358,12 +1411,164 @@ function markCut(order) {
   let msg = `Take ${parts.join(' and ')} of ${m.name} out of stock${order.spare ? `, and add ${count(order.spare)} new spare cut ${order.spare === 1 ? 'piece' : 'pieces'}` : ''}?`;
   if (order.full > m.stock) msg += `\n\nStock only shows ${count(m.stock)}, so it will go to 0.`;
   if (!confirm(msg)) return;
-  const dFull = Math.max(0, m.stock - order.full) - m.stock, dSpare = order.after.spare - m.spare;
-  m.stock += dFull; m.spare += dSpare;
-  logStock(m, dFull, dSpare, 'cut', `${count(order.used)} ${order.cut ? 'cut ' : ''}sheets used`);
-  saveInventory(); updateLowBadge(); calculate();
-  flash(`Took the job out of ${m.name} stock`);
+  const id = m.id, en = entry(), note = `${count(order.used)} ${order.cut ? 'cut ' : ''}sheets used`;
+  const ok = change(`Cut job${en.job ? ` "${en.job}"` : ''}: ${note} of ${m.name}`, d => {
+    const x = d.materials.find(y => y.id === id); if (!x) return;
+    const nStock = Math.max(0, x.stock - order.full), nSpare = Math.max(0, x.spare - order.fromSpare) + order.spare;
+    logStock(d, x, nStock - x.stock, nSpare - x.spare, 'cut', note, en);
+    x.stock = nStock; x.spare = nSpare;
+  });
+  if (ok) flash(`Took the job out of ${m.name} stock`);
 }
+
+// ---------- shared stock, stored in this GitHub repository ----------
+// The stock list is a JSON file on its own branch, so stock changes never touch the
+// site itself. Anyone can read it; changing it needs a GitHub key with write access to
+// the repository, kept only in this browser. Each change is a commit.
+const GH = { owner: 'dbulldesign', repo: 'LaserStock', branch: 'stock-data', path: 'stock.json' };
+const GH_API = `https://api.github.com/repos/${GH.owner}/${GH.repo}`;
+const KEY_STORE = 'laserstock.githubKey';
+let ghKey = ''; try { ghKey = localStorage.getItem(KEY_STORE) || ''; } catch {}
+const sync = { state: 'loading', sha: null, at: null, error: '', user: '' };
+
+function b64encode(str) { const b = new TextEncoder().encode(str); let s = ''; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); }
+function b64decode(b64) { return new TextDecoder().decode(Uint8Array.from(atob(b64.replace(/\s/g, '')), c => c.charCodeAt(0))); }
+function normaliseInv(d) { return { format: INV_FORMAT, materials: d.materials.map(cleanMaterial), sizes: cleanSizes(d.sizes), history: Array.isArray(d.history) ? d.history.slice(0, 500) : [] }; }
+const clone = (x) => JSON.parse(JSON.stringify(x));
+
+async function gh(path, opts = {}, key = ghKey) {
+  const headers = { Accept: 'application/vnd.github+json' };
+  if (opts.body) headers['Content-Type'] = 'application/json';
+  if (key) headers.Authorization = `Bearer ${key}`;
+  const res = await fetch(GH_API.replace(/\/repos\/.*$/, '') + path.replace(/^@/, `/repos/${GH.owner}/${GH.repo}`), { ...opts, headers, cache: 'no-store' });
+  let data = null; try { data = await res.json(); } catch {}
+  return { status: res.status, ok: res.ok, data };
+}
+function ghError(r) {
+  const msg = (r.data && r.data.message) || '';
+  if (r.status === 401) return 'GitHub didn’t accept the key. It may have expired or been mistyped; add it again.';
+  if (r.status === 403 && /rate limit/i.test(msg)) return 'GitHub’s hourly limit for reading without a key was reached. It resets within the hour; adding a key avoids it.';
+  if (r.status === 403 || r.status === 404) return 'This key can’t change the LaserStock repository. Check it has Contents: Read and write for it.';
+  return msg || `GitHub error ${r.status}`;
+}
+async function fetchShared() {
+  const r = await gh(`@/contents/${GH.path}?ref=${GH.branch}`);
+  if (r.status === 404) return { exists: false };
+  if (!r.ok) throw new Error(ghError(r));
+  const d = JSON.parse(b64decode(r.data.content));
+  if (!d || !Array.isArray(d.materials)) throw new Error('The shared stock file is damaged.');
+  return { exists: true, sha: r.data.sha, inv: normaliseInv(d) };
+}
+async function ensureBranch() {
+  if ((await gh(`@/git/ref/heads/${GH.branch}`)).ok) return;
+  const main = await gh('@/git/ref/heads/main'); if (!main.ok) throw new Error(ghError(main));
+  const c = await gh('@/git/refs', { method: 'POST', body: JSON.stringify({ ref: `refs/heads/${GH.branch}`, sha: main.data.object.sha }) });
+  if (!c.ok && c.status !== 422) throw new Error(ghError(c));
+}
+async function putShared(data, sha, message) {
+  const text = JSON.stringify({ app: 'LaserStock', kind: 'inventory', ...data }, null, 1);
+  const body = { message: `Stock: ${message}`.slice(0, 200), branch: GH.branch, content: b64encode(text) };
+  if (sha) body.sha = sha;
+  return gh(`@/contents/${GH.path}`, { method: 'PUT', body: JSON.stringify(body) });
+}
+
+// Load the shared stock (on start, when the Stock window opens, and when the tab comes back).
+let lastFetch = 0;
+async function refreshShared(force) {
+  if (!force && Date.now() - lastFetch < 30000) return;
+  lastFetch = Date.now();
+  try {
+    const cur = await fetchShared();
+    if (cur.exists) {
+      if (cur.sha !== sync.sha) { inv = cur.inv; sync.sha = cur.sha; afterInv(); }
+      sync.state = 'shared'; sync.at = new Date(); sync.error = '';
+    } else { sync.state = 'none'; sync.error = ''; }
+  } catch (e) { sync.state = 'error'; sync.error = e.message; }
+  renderSync();
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshShared(false); });
+
+// Change the stock: show it at once, then apply the same change to the newest shared copy
+// and save it. If someone else saved in between, fetch again and re-apply (nothing is lost).
+let saving = Promise.resolve();
+function change(message, op) {
+  if (!ghKey) { askForKey('To change the shared stock, add your GitHub key first. You can still use the calculator without one.'); return false; }
+  const before = clone(inv);
+  op(inv); afterInv();
+  saving = saving.then(async () => {
+    sync.state = 'saving'; renderSync();
+    try {
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const cur = await fetchShared();
+        const data = cur.exists ? cur.inv : clone(before);
+        op(data);
+        if (!cur.exists) await ensureBranch();
+        const r = await putShared(data, cur.sha, message);
+        if (r.ok) { inv = data; sync.sha = r.data.content.sha; sync.state = 'shared'; sync.at = new Date(); sync.error = ''; lastFetch = Date.now(); afterInv(); renderSync(); return; }
+        if (r.status === 409 || r.status === 422) { if (/branch/i.test((r.data && r.data.message) || '')) await ensureBranch(); continue; }
+        throw new Error(ghError(r));
+      }
+      throw new Error('Others kept changing the stock at the same moment. Please try again.');
+    } catch (e) {
+      sync.state = 'error'; sync.error = e.message; renderSync();
+      alert(`That change wasn’t saved to the shared stock.\n\n${e.message}`);
+      await refreshShared(true);
+    }
+  });
+  return true;
+}
+
+function renderSync() {
+  const t = sync.at ? sync.at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) : '';
+  const status = {
+    loading: 'Loading shared stock…',
+    saving: 'Saving to GitHub…',
+    shared: `Shared stock on GitHub${t ? ` · updated ${t}` : ''}`,
+    none: 'Not shared yet: this list is only in this browser.',
+    error: `Couldn’t reach the shared stock: ${sync.error}`,
+  }[sync.state];
+  const who = ghKey ? `Editing${sync.user ? ` as ${esc(sync.user)}` : ''} · <button type="button" class="linkbtn" id="keyOff">Remove key</button>`
+    : `View only · <button type="button" class="linkbtn" id="keyOn">Add GitHub key to make changes</button>`;
+  const start = sync.state === 'none' && ghKey ? ` <button type="button" class="btn" id="startShared">Share this list</button>` : '';
+  const bar = $('syncBar');
+  bar.className = `syncbar ${sync.state}`;
+  bar.innerHTML = `<span>${esc(status)}</span><span>${who}${start}</span> <button type="button" class="linkbtn" id="syncNow">Refresh</button>`;
+  $('stockBtn').title = `Materials and stock — ${status}`;
+}
+$('syncBar').addEventListener('click', (e) => {
+  const id = e.target.id;
+  if (id === 'keyOn') askForKey('');
+  if (id === 'keyOff' && confirm('Remove the GitHub key from this browser? You’ll still see the shared stock but can’t change it.')) {
+    ghKey = ''; sync.user = ''; try { localStorage.removeItem(KEY_STORE); } catch {} renderSync();
+  }
+  if (id === 'syncNow') { sync.state = 'loading'; renderSync(); refreshShared(true); }
+  if (id === 'startShared' && confirm(`Start the shared stock with the ${inv.materials.length} materials in this browser? Everyone will then see this list.`)) change('Start shared stock', () => {});
+});
+
+// Adding a key
+const keyDlg = $('keyDlg');
+function askForKey(reason) {
+  $('keyReason').textContent = reason; $('keyReason').hidden = !reason;
+  $('keyMsg').textContent = ''; $('keyIn').value = '';
+  keyDlg.showModal(); $('keyIn').focus();
+}
+$('keyCancel').addEventListener('click', () => keyDlg.close());
+$('keySave').addEventListener('click', async () => {
+  const k = $('keyIn').value.trim();
+  if (!k) { $('keyIn').focus(); return; }
+  $('keyMsg').textContent = 'Checking the key with GitHub…';
+  try {
+    const u = await gh('/user', {}, k);
+    if (!u.ok) throw new Error(ghError(u));
+    const repo = await gh('@', {}, k);
+    if (repo.ok && repo.data.permissions && !repo.data.permissions.push) throw new Error(`${u.data.login} doesn’t have write access to ${GH.owner}/${GH.repo}. Ask ${GH.owner} to add you as a collaborator.`);
+    ghKey = k; sync.user = u.data.login;
+    try { localStorage.setItem(KEY_STORE, k); } catch {}
+    keyDlg.close(); renderSync(); flash(`Connected as ${u.data.login}`);
+    refreshShared(true);
+  } catch (e) { $('keyMsg').textContent = e.message; }
+});
+$('keyIn').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('keySave').click(); });
 
 // Export / import the whole library (for backup or another computer).
 $('invExport').addEventListener('click', () => {
@@ -1378,16 +1583,17 @@ $('invFile').addEventListener('change', async () => {
   try {
     const d = JSON.parse(await f.text());
     if (!d || d.app !== 'LaserStock' || d.kind !== 'inventory' || !Array.isArray(d.materials)) throw new Error('This isn’t a LaserStock stock file.');
-    if (!confirm(`Replace the materials and stock in this browser with the ${d.materials.length} materials in ${f.name}?`)) return;
-    inv = { format: INV_FORMAT, materials: d.materials.map(cleanMaterial), sizes: cleanSizes(d.sizes), history: Array.isArray(d.history) ? d.history.slice(0, 500) : [] };
-    renderSizeBtns();
-    invChanged(); renderInv(); flash(`Imported ${f.name}`);
+    if (!confirm(`Replace the shared materials and stock with the ${d.materials.length} materials in ${f.name}?`)) return;
+    const next = normaliseInv(d);
+    if (change(`Import ${f.name}`, x => { x.materials = next.materials; x.sizes = next.sizes; x.history = next.history; })) flash(`Imported ${f.name}`);
   } catch (e) { alert(`Couldn’t import ${f.name}: ${e instanceof SyntaxError ? 'the file isn’t valid JSON.' : e.message}`); }
 });
 
 // ---------- init ----------
 { const p0 = presetsFor(state.unit)[0]; if (p0) { state.w = p0.w; state.h = p0.h; } else state.preset = 'custom'; }
 updateLowBadge();
+renderSync(); refreshShared(true);
+if (ghKey) gh('/user').then(u => { if (u.ok) { sync.user = u.data.login; renderSync(); } });
 buildPresetOptions(); syncUnitsUI(); syncInputs(); renderRows(); calculate();
 </script>
 </body>

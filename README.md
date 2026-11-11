@@ -4,9 +4,11 @@ Sheet nesting calculator for laser cutting circles. Enter a stock sheet and the
 circles you need; it works out how many sheets to use and order, and lays the
 circles out in even grids.
 
-Current version: **1.12.0**
+Current version: **1.13.0**
 
 ## Versions
+
+- **1.13.0** — Shared stock through GitHub: everyone sees the same materials and counts; changing them needs a GitHub key. Every change is a commit on the `stock-data` branch, and simultaneous changes are merged.
 
 - **1.12.0** — Spacing shown and editable in both mm and inches side by side; switching page units no longer rounds the spacing.
 
@@ -31,6 +33,21 @@ Current version: **1.12.0**
 - **1.2.0** — Circles are always laid out in even rectangular grids.
 - **1.1.0** — Version number and update banner; Brightview is nested on 24 × 36 in
   cut sheets and the full 24 × 72 in sheets to order are shown.
+
+## Shared stock
+
+Materials, stock counts, preset sizes and the stock history live in `stock.json` on the
+`stock-data` branch of this repository (kept apart from `main`, so stock changes never
+rebuild the site). Anyone can view it. To change stock, open **Stock → Add GitHub key**
+and paste a key with write access to this repository:
+
+- **Repository owner:** a fine-grained token limited to this repository with
+  *Contents: Read and write*.
+- **Collaborators:** a classic token with the `public_repo` scope.
+
+The key is kept only in that browser. Each change is saved as a commit under the key
+owner's name, so the branch history is a full audit trail. The first time, someone with a
+key clicks **Share this list** to start the shared file from their browser's list.
 
 ## Releasing
 
