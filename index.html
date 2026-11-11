@@ -163,6 +163,31 @@ input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer;
 .answer { margin: 0 0 6px; font-family: "Barlow Semi Condensed", "Barlow", sans-serif; font-weight: 600; font-size: 40px; line-height: 1.05; letter-spacing: -0.01em; }
 .answer em { font-style: normal; color: var(--accent); }
 .answer-sub { margin: 0 0 18px; color: var(--muted); max-width: 70ch; font-size: 15px; }
+.stockbox { display: grid; grid-template-columns: repeat(3, minmax(0, max-content)); gap: 6px 28px; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent-ok, #2e9d5b); border-radius: 6px; padding: 12px 16px; margin: 0 0 18px; max-width: 70ch; }
+.stockbox.short { border-left-color: var(--accent); }
+.stockbox span { display: block; font-size: 12.5px; color: var(--muted); }
+.stockbox b { font-weight: 600; }
+.stockbox p { grid-column: 1 / -1; margin: 4px 0 0; color: var(--muted); font-size: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+@media (max-width: 560px) { .stockbox { grid-template-columns: 1fr; } }
+.badge[hidden] { display: none; }
+.badge { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--accent); color: var(--accent-ink); font-size: 12px; line-height: 18px; text-align: center; }
+dialog.dlg { width: min(860px, calc(100% - 24px)); max-height: calc(100vh - 32px); border: 1px solid var(--line-strong); border-radius: 8px; padding: 0; background: var(--bg); color: var(--ink); }
+dialog.dlg::backdrop { background: rgba(0, 0, 0, .45); }
+.dlg-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 18px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.dlg-head h2 { margin: 0 auto 0 0; font-size: 18px; }
+.dlg-body { padding: 14px 18px 22px; }
+.mat-card { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; margin: 0 0 12px; }
+.mat-card.low { border-left: 4px solid var(--accent); }
+.mat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 12px; margin-top: 10px; }
+.mat-grid label > span, .mat-name > span { display: block; color: var(--muted); font-size: 12.5px; margin-bottom: 3px; }
+.mat-card input, .mat-card select { width: 100%; padding: 6px 8px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); }
+.pair { display: flex; align-items: center; gap: 4px; } .pair input { min-width: 0; }
+.mat-top { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.mat-name { flex: 1 1 200px; }
+.mat-note { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+table.hist { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.hist th, table.hist td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.hist th { color: var(--muted); font-weight: 500; }
 .notice { background: var(--warn-bg); color: var(--warn-ink); padding: 10px 14px; border-radius: 6px; margin: 0 0 18px; max-width: 70ch; }
 .status { color: var(--muted); }
 
@@ -196,6 +221,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
   </div>
   <div class="top-actions">
   <span class="status" id="fileStatus" role="status"></span>
+  <button type="button" class="btn" id="stockBtn" title="Materials and stock">Stock<span class="badge" id="lowBadge" hidden></span></button>
   <button type="button" class="btn" id="openBtn" title="Open a saved job file (.json)">Open…</button>
   <button type="button" class="btn" id="saveBtn" title="Save all settings and the calculated sheets to a file">Save</button>
   <input type="file" id="fileIn" accept=".json,application/json" hidden>
@@ -255,11 +281,28 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
   <section class="results" id="results" aria-live="polite"></section>
 </main>
 
+<dialog class="dlg" id="stockDlg" aria-labelledby="stockTitle">
+  <div class="dlg-head">
+    <h2 id="stockTitle">Materials &amp; stock</h2>
+    <button type="button" class="btn" id="addMat">Add material</button>
+    <button type="button" class="btn" id="invExport">Export…</button>
+    <button type="button" class="btn" id="invImport">Import…</button>
+    <input type="file" id="invFile" accept=".json,application/json" hidden>
+    <button type="button" class="btn primary" id="stockClose">Done</button>
+  </div>
+  <div class="dlg-body">
+    <p class="hint" style="margin-top:0">Each material appears in the Size list. Stock counts are saved in this browser; use Export to back them up or move them to another computer. “Cut to” is the piece size that goes in the laser; leave it blank if sheets go in whole.</p>
+    <div id="matList"></div>
+    <h3 style="margin:22px 0 8px;font-size:16px">History</h3>
+    <div id="histList"></div>
+  </div>
+</dialog>
+
 <script>
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.9.0';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows at an
@@ -435,6 +478,36 @@ const MATERIALS = [
   { name: 'Fade Not Poly', w: 24, h: 24, unit: 'in' },
   { name: 'Brightview', w: 24, h: 72, unit: 'in', cut: { w: 24, h: 36 } },
 ];
+// ---------- materials library + stock (saved in this browser) ----------
+// MATERIALS above only seeds the library the first time; after that, materials and
+// stock counts are edited in the Stock dialog and kept in localStorage.
+const INV_KEY = 'laserstock.inventory.v1';
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+function cleanMaterial(m) {
+  const n = (v, d = 0) => (typeof v === 'number' && isFinite(v) && v >= 0 ? v : d);
+  const unit = m.unit === 'mm' ? 'mm' : 'in';
+  const cut = m.cut && n(m.cut.w) > 0 && n(m.cut.h) > 0 ? { w: m.cut.w, h: m.cut.h } : null;
+  return { id: m.id || uid(), name: String(m.name || 'Material').slice(0, 80), unit, w: n(m.w, 24) || 24, h: n(m.h, 48) || 48, cut,
+    stock: Math.floor(n(m.stock)), spare: Math.floor(n(m.spare)), reorderAt: Math.floor(n(m.reorderAt)), notes: String(m.notes || '').slice(0, 300) };
+}
+function seedInventory() { return { materials: MATERIALS.map(m => cleanMaterial(m)), history: [] }; }
+function loadInventory() {
+  try {
+    const d = JSON.parse(localStorage.getItem(INV_KEY));
+    if (d && Array.isArray(d.materials)) return { materials: d.materials.map(cleanMaterial), history: Array.isArray(d.history) ? d.history.slice(0, 500) : [] };
+  } catch {}
+  return seedInventory();
+}
+let inv = loadInventory();
+function saveInventory() {
+  try { localStorage.setItem(INV_KEY, JSON.stringify(inv)); return true; }
+  catch { flash('Couldn’t save stock in this browser (private window?). Export a backup instead.'); return false; }
+}
+function logStock(m, full, spare, type, note) {
+  inv.history.unshift({ id: uid(), at: new Date().toISOString(), type, matId: m.id, material: m.name, full, spare, job: state.name || '', note: note || '' });
+  inv.history.length = Math.min(inv.history.length, 500);
+}
+
 // Generic sheet sizes listed after the named materials.
 const GENERIC = {
   in: [
@@ -467,14 +540,18 @@ function piecesPerStock(sw, sh, cw, ch) {
   const b = Math.floor(sw / ch + eps) * Math.floor(sh / cw + eps);
   return Math.max(a, b);
 }
-function currentStock() {
+// The library material behind the selected size, if the sheet still matches it.
+function currentMaterial() {
   if (state.preset === 'custom') return null;
   const p = presetsFor(state.unit)[state.preset];
-  return p && p.stock && p.w === state.w && p.h === state.h ? p.stock : null;
+  if (!p || !p.mat || p.w !== state.w || p.h !== state.h) return null;
+  const m = p.mat;
+  const per = m.cut ? piecesPerStock(m.w, m.h, m.cut.w, m.cut.h) : 1;
+  return per > 0 ? { m, per } : null;
 }
 function roundTo(v, unit) { return unit === 'mm' ? Math.round(v * 10) / 10 : Math.round(v * 1000) / 1000; }
 function presetsFor(unit) {
-  const mats = MATERIALS.map(m => {
+  const mats = inv.materials.map(m => {
     const f = m.unit === unit ? 1 : (unit === 'mm' ? 25.4 : 1 / 25.4);
     const w = roundTo(m.w * f, unit), h = roundTo(m.h * f, unit);
     if (m.cut) {
@@ -482,10 +559,10 @@ function presetsFor(unit) {
       const cw = roundTo(m.cut.w * f, unit), ch = roundTo(m.cut.h * f, unit);
       const base = `${m.name} ${m.w} × ${m.h} ${m.unit}, cut to ${m.cut.w} × ${m.cut.h}`;
       const label = m.unit === unit ? base : `${base} (${cw} × ${ch} ${unit})`;
-      return { label, w: cw, h: ch, stock: { name: m.name, w, h } };
+      return { label, w: cw, h: ch, mat: m };
     }
     const label = m.unit === unit ? `${m.name} ${m.w} × ${m.h} ${m.unit}` : `${m.name} ${m.w} × ${m.h} ${m.unit} (${w} × ${h} ${unit})`;
-    return { label, w, h };
+    return { label, w, h, mat: m };
   });
   return mats.concat(GENERIC[unit]);
 }
@@ -711,25 +788,42 @@ function renderResults(res, sizes, W, H, margin, gap) {
   const lastUtil = last.area / sheetArea;
   const placedCount = res.sheets.reduce((a, s) => a + s.placed.length * s.reps, 0);
   const sheetName = `${fmt(W)} × ${fmt(H)} ${unitName()}`;
-  const stock = currentStock();
+  const cm = currentMaterial();
   let order = null;
-  if (stock) {
-    const per = piecesPerStock(stock.w, stock.h, W, H);
-    if (per > 0) {
-      const full = Math.ceil(n / per);
-      order = { per, full, spare: full * per - n, name: `${stock.name} ${fmt(stock.w)} × ${fmt(stock.h)} ${unitName()}` };
-    }
+  if (cm) {
+    // Spare cut pieces already in stock are used first, then full sheets are cut down.
+    const { m, per } = cm;
+    const fromSpare = m.cut ? Math.min(m.spare, n) : 0;
+    const full = Math.ceil((n - fromSpare) / per);
+    const spare = m.cut ? full * per - (n - fromSpare) : 0;   // new spare pieces this job leaves
+    const toOrder = Math.max(0, full - m.stock);
+    const after = { stock: Math.max(0, m.stock - full), spare: m.spare - fromSpare + spare };
+    order = { m, per, cut: !!m.cut, full, fromSpare, spare, toOrder, after, used: n,
+      low: m.reorderAt > 0 && after.stock <= m.reorderAt,
+      name: `${m.name} ${fmt(m.w)} × ${fmt(m.h)} ${m.unit}` };
   }
 
   lastRender = { res, sizes, W, H, margin, gap, order, overall, placedCount };
 
   let html = '';
   if (state.name) html += `<p class="job-name">${esc(state.name)}</p>`;
-  if (order) {
-    html += `<h2 class="answer"><em>${count(order.full)} full ${order.full === 1 ? 'sheet' : 'sheets'}</em> to order</h2>`;
-    html += `<p class="answer-sub">${order.name}, cut into ${count(order.per)} pieces of ${sheetName} each. The job uses <b>${count(n)} cut ${n === 1 ? 'sheet' : 'sheets'}</b>${order.spare ? `, leaving ${count(order.spare)} spare cut ${order.spare === 1 ? 'piece' : 'pieces'}` : ''}.</p>`;
+  const pl = (k, one, many) => `${count(k)} ${k === 1 ? one : many}`;
+  if (order && order.cut) {
+    html += `<h2 class="answer"><em>${pl(order.full, 'full sheet', 'full sheets')}</em> of ${esc(order.m.name)}</h2>`;
+    html += `<p class="answer-sub">${esc(order.name)}, cut into ${count(order.per)} pieces of ${sheetName} each. The job uses <b>${pl(n, 'cut sheet', 'cut sheets')}</b>${order.fromSpare ? ` (${count(order.fromSpare)} from spare pieces in stock)` : ''}${order.spare ? `, leaving ${pl(order.spare, 'new spare cut piece', 'new spare cut pieces')}` : ''}.</p>`;
   }
-  html += `<h2 class="answer"${order ? ' style="font-size:28px"' : ''}><em>${count(n)} ${order ? 'cut ' : ''}${n === 1 ? 'sheet' : 'sheets'}</em> of ${sheetName}</h2>`;
+  html += `<h2 class="answer"${order && order.cut ? ' style="font-size:28px"' : ''}><em>${count(n)} ${order && order.cut ? 'cut ' : ''}${n === 1 ? 'sheet' : 'sheets'}</em> of ${order && !order.cut ? esc(order.m.name) + ' ' : ''}${sheetName}</h2>`;
+  if (order) {
+    const m = order.m, unitWord = order.cut ? ['full sheet', 'full sheets'] : ['sheet', 'sheets'];
+    const spareTxt = (k) => order.cut ? `, ${pl(k, 'spare cut piece', 'spare cut pieces')}` : '';
+    html += `<div class="stockbox${order.toOrder ? ' short' : ''}">
+      <div><span>In stock</span><b>${pl(m.stock, ...unitWord)}${spareTxt(m.spare)}</b></div>
+      <div><span>After this job</span><b>${pl(order.after.stock, ...unitWord)}${spareTxt(order.after.spare)}</b></div>
+      <div><span>To order</span><b>${order.toOrder ? pl(order.toOrder, ...unitWord) : 'Nothing'}</b></div>
+      <p>${order.toOrder ? `Not enough in stock: order ${pl(order.toOrder, 'more ' + unitWord[0], 'more ' + unitWord[1])} of ${esc(m.name)}.` : 'Enough in stock for this job.'}${order.low ? ` This takes ${esc(m.name)} to or below its reorder level of ${count(m.reorderAt)}.` : ''}
+      <button type="button" class="btn" id="cutBtn">Mark job as cut…</button></p>
+    </div>`;
+  }
   let sub = `${count(placedCount)} circles, using ${pct(overall)} of the material overall.`;
   if (n > 1 || res.sheets.length > 1) sub += ` The last sheet is ${pct(lastUtil)} used, with its layout reaching ${fmt(last.maxX)} across and ${fmt(last.maxY)} up the sheet.`;
   else sub += ` The layout reaches ${fmt(last.maxX)} across and ${fmt(last.maxY)} up the sheet, so ${fmt(W - last.maxX)} ${unitName()} stays clear on the right and ${fmt(H - last.maxY)} ${unitName()} above.`;
@@ -758,11 +852,13 @@ function renderResults(res, sizes, W, H, margin, gap) {
   if (res.sheets.length > MAX_DRAWN) html += `<p class="hint">Only the first ${MAX_DRAWN} distinct layouts are drawn.</p>`;
   els.results.innerHTML = html;
 
+  if (order) $('cutBtn').addEventListener('click', () => markCut(order));
   $('copy').addEventListener('click', async () => {
     const lines = [];
     if (state.name) lines.push(state.name);
-    if (order) lines.push(`Order ${count(order.full)} full ${order.full === 1 ? 'sheet' : 'sheets'} of ${order.name} (${count(order.per)} cut pieces each${order.spare ? `, ${count(order.spare)} spare` : ''})`);
-    lines.push(`${count(n)} ${order ? 'cut ' : ''}${n === 1 ? 'sheet' : 'sheets'} of ${sheetName}`, `Spacing ${fmt(gap)} ${unitName()} between circles, ${fmt(margin)} ${unitName()} from the edge`, `${count(placedCount)} circles, ${pct(overall)} of material used overall`, '');
+    if (order) lines.push(`${order.cut ? 'Full sheets needed' : 'Sheets needed'}: ${count(order.full)} of ${order.name}${order.cut ? ` (${count(order.per)} cut pieces each${order.fromSpare ? `, plus ${count(order.fromSpare)} spare pieces from stock` : ''}${order.spare ? `, ${count(order.spare)} new spare` : ''})` : ''}`,
+      `In stock ${count(order.m.stock)}, after this job ${count(order.after.stock)}, to order ${count(order.toOrder)}`);
+    lines.push(`${count(n)} ${order && order.cut ? 'cut ' : ''}${n === 1 ? 'sheet' : 'sheets'} of ${sheetName}`, `Spacing ${fmt(gap)} ${unitName()} between circles, ${fmt(margin)} ${unitName()} from the edge`, `${count(placedCount)} circles, ${pct(overall)} of material used overall`, '');
     let i = 1;
     res.sheets.forEach((sh) => {
       const label = sh.reps > 1 ? `Sheets ${i}–${i + sh.reps - 1} (identical)` : `Sheet ${i}`;
@@ -876,7 +972,9 @@ function buildJobFile() {
       note: `Coordinates are circle centres in ${state.unit}, measured from the bottom-left corner of the sheet.`,
       sheetSize: { width: round4(W), height: round4(H), unit: state.unit },
       sheetsUsed: res.totalSheets,
-      fullSheetsToOrder: order ? { count: order.full, stock: order.name, piecesPerSheet: order.per, spare: order.spare } : null,
+      material: order ? { name: order.m.name, fullSheet: order.name, piecesPerFullSheet: order.cut ? order.per : null,
+        fullSheetsNeeded: order.full, spareUsedFromStock: order.fromSpare, newSparePieces: order.spare,
+        inStockWhenSaved: order.m.stock, toOrder: order.toOrder } : null,
       circles: placedCount,
       materialUsed: round4(overall),
       sheets: res.sheets.map(sh => {
@@ -961,7 +1059,142 @@ document.addEventListener('keydown', (e) => {
   if (k === 'o') { e.preventDefault(); $('fileIn').click(); }
 });
 
+// ---------- materials & stock dialog ----------
+const dlg = $('stockDlg');
+const numOr = (v, d) => { const x = parseFloat(v); return isFinite(x) && x >= 0 ? x : d; };
+const changeTxt = (h) => [h.full ? `${h.full > 0 ? '+' : '−'}${Math.abs(h.full)} full` : '', h.spare ? `${h.spare > 0 ? '+' : '−'}${Math.abs(h.spare)} spare` : ''].filter(Boolean).join(', ') || 'no change';
+
+// Rebuild the Size list after materials change, keeping the selected material if it still exists.
+function refreshPresets() {
+  const before = state.preset === 'custom' ? null : (presetsFor(state.unit)[state.preset] || {}).mat;
+  const list = presetsFor(state.unit);
+  if (before) {
+    const i = list.findIndex(p => p.mat === before);
+    if (i >= 0) { state.preset = i; state.w = list[i].w; state.h = list[i].h; } else state.preset = 'custom';
+  } else if (state.preset !== 'custom') {
+    const i = list.findIndex(p => p.w === state.w && p.h === state.h); state.preset = i >= 0 ? i : 'custom';
+  }
+  buildPresetOptions(); syncInputs(); updateLowBadge();
+}
+function updateLowBadge() {
+  const low = inv.materials.filter(m => m.reorderAt > 0 && m.stock <= m.reorderAt).length;
+  const b = $('lowBadge'); b.hidden = !low; b.textContent = low; b.title = `${low} material${low === 1 ? '' : 's'} at or below reorder level`;
+}
+function renderInv() {
+  $('matList').innerHTML = inv.materials.length ? inv.materials.map((m, i) => {
+    const low = m.reorderAt > 0 && m.stock <= m.reorderAt;
+    const per = m.cut ? piecesPerStock(m.w, m.h, m.cut.w, m.cut.h) : 1;
+    return `<div class="mat-card${low ? ' low' : ''}" data-m="${i}">
+      <div class="mat-top">
+        <label class="mat-name"><span>Name</span><input data-f="name" value="${esc(m.name)}"></label>
+        <button type="button" class="btn" data-act="receive">Receive sheets…</button>
+        <button type="button" class="btn" data-act="delete" aria-label="Delete ${esc(m.name)}">Delete</button>
+      </div>
+      <div class="mat-grid">
+        <label><span>Full sheet (W × H)</span><div class="pair"><input data-f="w" inputmode="decimal" value="${m.w}"> × <input data-f="h" inputmode="decimal" value="${m.h}"></div></label>
+        <label><span>Unit</span><select data-f="unit"><option value="in"${m.unit === 'in' ? ' selected' : ''}>in</option><option value="mm"${m.unit === 'mm' ? ' selected' : ''}>mm</option></select></label>
+        <label><span>Cut to (W × H, optional)</span><div class="pair"><input data-f="cw" inputmode="decimal" value="${m.cut ? m.cut.w : ''}" placeholder="—"> × <input data-f="ch" inputmode="decimal" value="${m.cut ? m.cut.h : ''}" placeholder="—"></div></label>
+        <label><span>In stock (${m.cut ? 'full sheets' : 'sheets'})</span><input data-f="stock" inputmode="numeric" value="${m.stock}"></label>
+        ${m.cut ? `<label><span>Spare cut pieces</span><input data-f="spare" inputmode="numeric" value="${m.spare}"></label>` : ''}
+        <label><span>Reorder at</span><input data-f="reorderAt" inputmode="numeric" value="${m.reorderAt}"></label>
+        <label style="grid-column:1/-1"><span>Notes (supplier, thickness, colour…)</span><input data-f="notes" value="${esc(m.notes)}"></label>
+      </div>
+      <p class="mat-note">${m.cut ? (per ? `${count(per)} cut pieces per full sheet.` : 'The cut size doesn’t fit on the full sheet.') : 'Sheets go in the laser whole.'}${low ? ` <b>At or below reorder level.</b>` : ''}</p>
+    </div>`;
+  }).join('') : '<p class="empty">No materials yet. Use Add material.</p>';
+  const hist = inv.history.slice(0, 100);
+  $('histList').innerHTML = hist.length ? `<table class="hist"><thead><tr><th>When</th><th>Material</th><th>Change</th><th>Job / note</th><th></th></tr></thead><tbody>${hist.map(h => `
+    <tr><td>${new Date(h.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</td><td>${esc(h.material)}</td>
+    <td>${h.type === 'cut' ? 'Cut ' : h.type === 'receive' ? 'Received ' : 'Adjusted '}${changeTxt(h)}</td><td>${esc([h.job, h.note].filter(Boolean).join(' — '))}</td>
+    <td>${inv.materials.some(m => m.id === h.matId) ? `<button type="button" class="btn" data-undo="${h.id}">Undo</button>` : ''}</td></tr>`).join('')}</tbody></table>`
+    : '<p class="empty">Nothing yet. Received sheets, stock edits and jobs marked as cut show up here.</p>';
+}
+function invChanged() { saveInventory(); refreshPresets(); schedule(); }
+
+$('stockBtn').addEventListener('click', () => { renderInv(); dlg.showModal(); });
+$('stockClose').addEventListener('click', () => dlg.close());
+$('addMat').addEventListener('click', () => {
+  const mm = state.unit === 'mm';
+  inv.materials.push(cleanMaterial({ name: 'New material', unit: state.unit, w: mm ? 1220 : 48, h: mm ? 2440 : 96 }));
+  invChanged(); renderInv();
+  const cards = $('matList').querySelectorAll('.mat-card'); const inp = cards[cards.length - 1].querySelector('[data-f="name"]'); inp.focus(); inp.select();
+});
+$('matList').addEventListener('change', (e) => {
+  const card = e.target.closest('.mat-card'), f = e.target.dataset.f; if (!card || !f) return;
+  const m = inv.materials[+card.dataset.m], v = e.target.value;
+  if (f === 'name') m.name = v.trim().slice(0, 80) || m.name;
+  else if (f === 'notes') m.notes = v.slice(0, 300);
+  else if (f === 'unit') m.unit = v === 'mm' ? 'mm' : 'in';
+  else if (f === 'w' || f === 'h') m[f] = numOr(v, m[f]) || m[f];
+  else if (f === 'cw' || f === 'ch') {
+    const card2 = e.target.closest('.mat-card'), cw = numOr(card2.querySelector('[data-f="cw"]').value, 0), ch = numOr(card2.querySelector('[data-f="ch"]').value, 0);
+    m.cut = cw > 0 && ch > 0 ? { w: cw, h: ch } : null;
+    if (!m.cut) m.spare = 0;
+  } else if (f === 'stock' || f === 'spare') {
+    const nv = Math.floor(numOr(v, m[f]));
+    if (nv !== m[f]) { logStock(m, f === 'stock' ? nv - m.stock : 0, f === 'spare' ? nv - m.spare : 0, 'adjust', 'Edited count'); m[f] = nv; }
+  } else if (f === 'reorderAt') m.reorderAt = Math.floor(numOr(v, m.reorderAt));
+  invChanged(); renderInv();
+});
+$('matList').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-act]'); if (!b) return;
+  const m = inv.materials[+b.closest('.mat-card').dataset.m];
+  if (b.dataset.act === 'delete') {
+    if (!confirm(`Delete ${m.name}? Its stock count goes with it (history entries stay).`)) return;
+    inv.materials.splice(inv.materials.indexOf(m), 1);
+  } else {
+    const k = Math.floor(numOr(prompt(`How many ${m.cut ? 'full sheets' : 'sheets'} of ${m.name} came in?`, '1'), 0));
+    if (!k) return;
+    m.stock += k; logStock(m, k, 0, 'receive', '');
+  }
+  invChanged(); renderInv();
+});
+$('histList').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-undo]'); if (!b) return;
+  const h = inv.history.find(x => x.id === b.dataset.undo), m = h && inv.materials.find(x => x.id === h.matId); if (!m) return;
+  if (!confirm(`Undo “${h.type === 'cut' ? 'Cut' : h.type === 'receive' ? 'Received' : 'Adjusted'} ${changeTxt(h)}” on ${m.name}?`)) return;
+  m.stock = Math.max(0, m.stock - h.full); m.spare = Math.max(0, m.spare - h.spare);
+  inv.history.splice(inv.history.indexOf(h), 1);
+  invChanged(); renderInv();
+});
+
+// Take a finished job out of stock.
+function markCut(order) {
+  const m = order.m;
+  const parts = [`${count(order.full)} ${order.cut ? 'full ' : ''}${order.full === 1 ? 'sheet' : 'sheets'}`];
+  if (order.fromSpare) parts.push(`${count(order.fromSpare)} spare cut ${order.fromSpare === 1 ? 'piece' : 'pieces'}`);
+  let msg = `Take ${parts.join(' and ')} of ${m.name} out of stock${order.spare ? `, and add ${count(order.spare)} new spare cut ${order.spare === 1 ? 'piece' : 'pieces'}` : ''}?`;
+  if (order.full > m.stock) msg += `\n\nStock only shows ${count(m.stock)}, so it will go to 0.`;
+  if (!confirm(msg)) return;
+  const dFull = Math.max(0, m.stock - order.full) - m.stock, dSpare = order.after.spare - m.spare;
+  m.stock += dFull; m.spare += dSpare;
+  logStock(m, dFull, dSpare, 'cut', `${count(order.used)} ${order.cut ? 'cut ' : ''}sheets used`);
+  saveInventory(); updateLowBadge(); calculate();
+  flash(`Took the job out of ${m.name} stock`);
+}
+
+// Export / import the whole library (for backup or another computer).
+$('invExport').addEventListener('click', () => {
+  const text = JSON.stringify({ app: 'LaserStock', kind: 'inventory', format: 1, savedAt: new Date().toISOString(), ...inv }, null, 2);
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const a = document.createElement('a'); a.href = url; a.download = `laserstock-stock ${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+$('invImport').addEventListener('click', () => $('invFile').click());
+$('invFile').addEventListener('change', async () => {
+  const f = $('invFile').files[0]; $('invFile').value = ''; if (!f) return;
+  try {
+    const d = JSON.parse(await f.text());
+    if (!d || d.app !== 'LaserStock' || d.kind !== 'inventory' || !Array.isArray(d.materials)) throw new Error('This isn’t a LaserStock stock file.');
+    if (!confirm(`Replace the materials and stock in this browser with the ${d.materials.length} materials in ${f.name}?`)) return;
+    inv = { materials: d.materials.map(cleanMaterial), history: Array.isArray(d.history) ? d.history.slice(0, 500) : [] };
+    invChanged(); renderInv(); flash(`Imported ${f.name}`);
+  } catch (e) { alert(`Couldn’t import ${f.name}: ${e instanceof SyntaxError ? 'the file isn’t valid JSON.' : e.message}`); }
+});
+
 // ---------- init ----------
+{ const p0 = presetsFor(state.unit)[0]; if (p0) { state.w = p0.w; state.h = p0.h; } else state.preset = 'custom'; }
+updateLowBadge();
 buildPresetOptions(); syncUnitsUI(); syncInputs(); renderRows(); calculate();
 </script>
 </body>
