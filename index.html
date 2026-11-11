@@ -172,6 +172,8 @@ input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer;
 .jobcard tr[data-part] { cursor: pointer; } .jobcard tr[data-part]:hover td { background: var(--panel); }
 .jobcard td.order { color: var(--accent); font-weight: 600; }
 .jobcard .acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.jobmatch { margin: 8px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--warn-bg); color: var(--warn-ink); font-size: 13.5px; }
+.jobmatch .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .circ-tag { grid-column: 2 / 5; margin-top: -4px; font-size: 12.5px; color: var(--muted); }
 .size-btns { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
 .chip { display: inline-flex; align-items: stretch; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--surface); overflow: hidden; font-size: 13.5px; }
@@ -296,7 +298,10 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
   <aside class="controls" id="controls" aria-label="Inputs">
     <section class="group">
       <h2>Job</h2>
-      <label class="field"><span>Job name (used for the saved file)</span><input id="jobName" class="len" type="text" autocomplete="off" placeholder="e.g. Lobby pendants, order 1042"></label>
+      <label class="field"><span>Planned job</span><select id="jobPick"></select></label>
+      <label class="field" style="margin-top:10px"><span>Job name</span><input id="jobName" class="len" type="text" list="jobNames" autocomplete="off" placeholder="e.g. Lobby pendants, order 1042"></label>
+      <datalist id="jobNames"></datalist>
+      <div class="jobmatch" id="jobMatch" hidden></div>
     </section>
     <section class="group">
       <h2>Materials in this job</h2>
@@ -410,7 +415,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.15.0';
+const APP_VERSION = '1.16.0';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows at an
@@ -1309,6 +1314,17 @@ function addToJobs(asNew) {
     if (!name) return;
     state.name = name; $('jobName').value = name;
   }
+  // Same name as another planned job: add what is open to that job rather than making a twin.
+  const same = findJobByName(name, state.jobId);
+  if (same) {
+    if (asNew) { if (!confirm(`There’s already a planned job called “${same.name}”. Add this as a separate job with the same name?`)) return; }
+    else {
+      if (!confirm(`“${same.name}” is already a planned job (${describeJob(same)}).
+
+Add the materials and circles you have open to it?`)) return;
+      addCurrentTo(same); return;
+    }
+  }
   const id = !asNew && state.jobId ? state.jobId : uid();
   const job = { id, name, at: new Date().toISOString(),
     parts: tracked.map(({ c }) => ({ matId: c.m.id, material: c.m.name, sheets: c.n, circles: c.placed, summary: c.summary })),
@@ -1319,8 +1335,28 @@ function addToJobs(asNew) {
     const k = d.jobs.findIndex(j => j.id === id);
     if (k >= 0) d.jobs[k] = clone(job); else d.jobs.push(clone(job));
   })) return;
-  state.jobId = id;
+  state.jobId = id; renderJobPicker();
   flash(updating ? `Updated planned job “${name}”` : `Added “${name}” to planned jobs`);
+}
+
+// Read the materials (parts) out of saved job settings.
+function partsFromSettings(st) {
+  const num = (v, min) => (typeof v === 'number' && isFinite(v) && v >= min ? v : null);
+  const unit = st.unit === 'mm' ? 'mm' : 'in';
+  const readCircles = (list) => (Array.isArray(list) ? list.map(c => ({
+    d: num(c.diameter, 0) || 0, u: c.unit === 'mm' ? 'mm' : 'in', q: Math.floor(num(c.quantity, 0) || 0), name: typeof c.name === 'string' ? c.name.slice(0, 30) : '',
+  })) : []);
+  // Files from before 1.15 have one material; newer ones list every material in `parts`.
+  const raw = Array.isArray(st.parts) && st.parts.length ? st.parts
+    : [{ material: st.material, preset: st.preset, sheet: { width: st.sheet && st.sheet.width, height: st.sheet && st.sheet.height, unit }, circles: st.circles }];
+  return raw.map(p => {
+    const w = num(p.sheet && p.sheet.width, 0), h = num(p.sheet && p.sheet.height, 0);
+    if (!w || !h) throw new Error('The file has no sheet size.');
+    const m = p.material ? inv.materials.find(x => x.name === p.material) : null;
+    const circles = readCircles(p.circles);
+    return { matId: m ? m.id : null, preset: p.preset || 'Custom size', unit: p.sheet.unit === 'mm' ? 'mm' : (p.sheet.unit === 'in' ? 'in' : unit), w, h,
+      circles: circles.length ? circles : [{ d: 0, q: 0, u: unit }] };
+  });
 }
 
 function applyJob(job) {
@@ -1330,17 +1366,7 @@ function applyJob(job) {
   const readCircles = (list) => (Array.isArray(list) ? list.map(c => ({
     d: num(c.diameter, 0) || 0, u: c.unit === 'mm' ? 'mm' : 'in', q: Math.floor(num(c.quantity, 0) || 0), name: typeof c.name === 'string' ? c.name.slice(0, 30) : '',
   })) : []);
-  // Files from before 1.15 have one material; newer ones list every material in `parts`.
-  const raw = Array.isArray(st.parts) && st.parts.length ? st.parts
-    : [{ material: st.material, preset: st.preset, sheet: { width: st.sheet && st.sheet.width, height: st.sheet && st.sheet.height, unit }, circles: st.circles }];
-  const parts = raw.map(p => {
-    const w = num(p.sheet && p.sheet.width, 0), h = num(p.sheet && p.sheet.height, 0);
-    if (!w || !h) throw new Error('The file has no sheet size.');
-    const m = p.material ? inv.materials.find(x => x.name === p.material) : null;
-    const circles = readCircles(p.circles);
-    return { matId: m ? m.id : null, preset: p.preset || 'Custom size', unit: p.sheet.unit === 'mm' ? 'mm' : (p.sheet.unit === 'in' ? 'in' : unit), w, h,
-      circles: circles.length ? circles : [{ d: 0, q: 0, u: unit }] };
-  });
+  const parts = partsFromSettings(st);
   state.unit = unit;
   state.gap = num(st.spacing && st.spacing.betweenCircles, 0) ?? state.gap;
   state.margin = num(st.spacing && st.spacing.fromEdge, 0) ?? state.margin;
@@ -1501,7 +1527,7 @@ function afterInv() {
   const a = document.activeElement, typing = dlg.open && a && dlg.contains(a) && /^(INPUT|SELECT)$/.test(a.tagName);
   if (dlg.open && !typing) renderInv();
   if (jobsDlg.open) renderJobs();
-  updateJobsBadge();
+  updateJobsBadge(); renderJobPicker();
   schedule();
 }
 
@@ -1649,7 +1675,7 @@ function markJobCut() {
   const ok = change(`Cut job${en.job ? ` "${en.job}"` : ''}: ${cuts.map(({ c }) => `${c.n} ${c.n === 1 ? 'sheet' : 'sheets'} of ${c.m.name}`).join(', ')}`, d => {
     cuts.forEach(({ c }, k) => cutInto(d, c.m.id, c.n, `${count(c.n)} ${c.m.cut ? 'cut ' : ''}sheets used`, { ...en, id: en.id + k }, k === cuts.length - 1 ? jobId : null));
   });
-  if (ok) { if (jobId) state.jobId = null; flash('Took the job out of stock'); }
+  if (ok) { if (jobId) state.jobId = null; renderJobPicker(); flash('Took the job out of stock'); }
 }
 
 // ---------- planned jobs & purchasing ----------
@@ -1690,8 +1716,7 @@ $('jobList').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   const id = b.dataset.jobOpen || b.dataset.jobCut || b.dataset.jobDel, j = (inv.jobs || []).find(x => x.id === id); if (!j) return;
   if (b.dataset.jobOpen) {
-    try { applyJob({ app: 'LaserStock', name: j.name, settings: j.settings }); state.jobId = j.id; calculate(); jobsDlg.close(); flash(`Opened planned job “${j.name}”`); }
-    catch (err) { alert(`Couldn’t open that job: ${err.message}`); }
+    if (openPlanned(j)) jobsDlg.close();
   } else if (b.dataset.jobCut) {
     const cuts = j.parts.map(p => ({ p, m: inv.materials.find(x => x.id === p.matId) })).filter(x => x.m && x.p.sheets);
     if (!cuts.length) { alert('None of this job’s materials are in the stock list any more.'); return; }
@@ -1714,6 +1739,83 @@ $('copyOrder').addEventListener('click', async () => {
     : ['Nothing to buy for the planned jobs.'];
   try { await navigator.clipboard.writeText(lines.join('\n')); flash('Order list copied'); } catch { alert(lines.join('\n')); }
 });
+
+// ---------- picking, opening and combining planned jobs ----------
+const sameName = (a, b) => a.trim().replace(/\s+/g, ' ').toLowerCase() === b.trim().replace(/\s+/g, ' ').toLowerCase();
+const findJobByName = (name, exceptId) => (inv.jobs || []).find(j => j.id !== exceptId && sameName(j.name, name));
+const describeJob = (j) => j.parts.map(p => `${p.material}: ${count(p.sheets)} ${p.sheets === 1 ? 'sheet' : 'sheets'}`).join(', ');
+// Work that isn't saved to a planned job yet (and would be lost by opening another job).
+const unsavedWork = () => !state.jobId && allParts().some(p => partCount(p) > 0);
+
+function openPlanned(j, quiet) {
+  if (!quiet && unsavedWork() && !confirm(`Open “${j.name}”? The circles you have open now aren’t saved to a job and will be cleared.\n\n(To keep them, cancel and use “Add to it” or Add to jobs instead.)`)) { renderJobPicker(); return false; }
+  try {
+    applyJob({ app: 'LaserStock', name: j.name, settings: j.settings });
+    state.jobId = j.id; renderJobPicker(); calculate();
+    flash(`Opened planned job “${j.name}”`); return true;
+  } catch (err) { alert(`Couldn’t open that job: ${err.message}`); renderJobPicker(); return false; }
+}
+// Combine parts: the same material merges its circles (same size adds up), new materials are added.
+function mergeParts(base, extra) {
+  const out = clone(base);
+  for (const p of extra) {
+    const k = p.matId ? out.findIndex(b => b.matId === p.matId) : -1;
+    if (k < 0) { out.push(clone(p)); continue; }
+    const rows = out[k].circles.filter(c => c.d > 0 && c.q > 0);
+    for (const c of p.circles) {
+      if (!(c.d > 0 && c.q > 0)) continue;
+      const same = rows.find(x => x.u === c.u && Math.abs(x.d - c.d) < 1e-9);
+      if (same) same.q += c.q; else rows.push({ ...c });
+    }
+    out[k].circles = rows.length ? rows : out[k].circles;
+  }
+  return out;
+}
+function addCurrentTo(j) {
+  storeActive();
+  let base; try { base = partsFromSettings(j.settings); } catch (err) { alert(`Couldn’t read “${j.name}”: ${err.message}`); return; }
+  const activeMat = state.parts[state.active].matId;
+  state.parts = mergeParts(base, state.parts.filter(p => partCount(p) > 0));
+  state.jobId = j.id; state.name = j.name; $('jobName').value = j.name;
+  const k = state.parts.findIndex(p => p.matId === activeMat);
+  loadPart(k >= 0 ? k : 0);
+  addToJobs(false);
+}
+function newJob() {
+  storeActive();
+  const base = snapshotPart();
+  state.parts = [{ ...base, circles: [{ d: 0, q: 0, u: state.circles[0] ? state.circles[0].u : state.unit }] }];
+  state.jobId = null; state.name = ''; $('jobName').value = '';
+  loadPart(0); renderJobPicker(); $('jobName').focus();
+}
+function renderJobPicker() {
+  const jobs = inv.jobs || [], sel = $('jobPick');
+  sel.innerHTML = `<option value="">${jobs.length ? 'New job (not saved yet)' : 'New job — no planned jobs yet'}</option>`
+    + jobs.map(j => `<option value="${esc(j.id)}">${esc(j.name)} · ${count(j.parts.length)} material${j.parts.length === 1 ? '' : 's'}</option>`).join('');
+  sel.value = jobs.some(j => j.id === state.jobId) ? state.jobId : '';
+  if (state.jobId && !jobs.some(j => j.id === state.jobId)) state.jobId = null;   // it was cut or removed elsewhere
+  $('jobNames').innerHTML = jobs.map(j => `<option value="${esc(j.name)}">`).join('');
+  renderJobMatch();
+}
+function renderJobMatch() {
+  const box = $('jobMatch'), j = state.name.trim() ? findJobByName(state.name, state.jobId) : null;
+  box.hidden = !j;
+  if (!j) return;
+  box.innerHTML = `“${esc(j.name)}” is already a planned job (${esc(describeJob(j))}).
+    <div class="acts"><button type="button" class="btn" data-m="open">Open it</button>${allParts().some(p => partCount(p) > 0) ? '<button type="button" class="btn primary" data-m="add">Add what’s open to it</button>' : ''}</div>`;
+}
+$('jobMatch').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-m]'), j = findJobByName(state.name, state.jobId); if (!b || !j) return;
+  if (b.dataset.m === 'open') openPlanned(j); else addCurrentTo(j);
+});
+$('jobPick').addEventListener('change', () => {
+  const id = $('jobPick').value;
+  if (!id) { if (state.jobId || !unsavedWork() || confirm('Start a new job? The circles you have open aren’t saved to a job and will be cleared.')) newJob(); else renderJobPicker(); return; }
+  const j = (inv.jobs || []).find(x => x.id === id); if (j) openPlanned(j);
+});
+$('jobName').addEventListener('input', renderJobMatch);
+// Picking a name from the suggestions opens that job straight away when nothing unsaved is open.
+$('jobName').addEventListener('change', () => { const j = findJobByName(state.name, state.jobId); if (j && !unsavedWork()) openPlanned(j, true); });
 
 // ---------- shared stock, stored in this GitHub repository ----------
 // The stock list is a JSON file on its own branch, so stock changes never touch the
@@ -1906,7 +2008,7 @@ $('invFile').addEventListener('change', async () => {
 // ---------- init ----------
 { const p0 = presetsFor(state.unit)[0]; if (p0) { state.w = p0.w; state.h = p0.h; } else state.preset = 'custom'; }
 state.parts = [snapshotPart()]; state.active = 0;
-updateLowBadge(); updateJobsBadge();
+updateLowBadge(); updateJobsBadge(); renderJobPicker();
 renderSync(); refreshShared(true);
 if (ghKey) gh('/user').then(u => { if (u.ok) { sync.user = u.data.login; renderSync(); } });
 buildPresetOptions(); syncUnitsUI(); syncInputs(); renderRows(); calculate();
