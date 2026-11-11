@@ -110,6 +110,8 @@ button, input, select { font: inherit; color: inherit; }
 .controls { background: var(--panel); border-right: 1px solid var(--line); padding: 18px 20px 28px; }
 @media (min-width: 900px) { .controls { position: sticky; top: env(safe-area-inset-top, 0px); max-height: 100vh; overflow-y: auto; } }
 .results { padding: 22px 24px 40px; min-width: 0; }
+.results > * { transition: opacity .12s; }
+.results.busy > * { opacity: .55; transition: opacity .15s .25s; }
 @media (max-width: 899px) {
   .layout { grid-template-columns: 1fr; }
   .controls { border-right: 0; border-bottom: 1px solid var(--line); }
@@ -226,7 +228,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.4.1';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows and
@@ -529,10 +531,12 @@ let timer = null, token = 0;
 function schedule() {
   clearTimeout(timer);
   timer = setTimeout(() => {
+    // Keep the current results on screen and swap them in place when the new ones are
+    // ready, so the page doesn't blank out and jump. They only dim if a big job is slow.
     const my = ++token;
-    els.results.innerHTML = '<p class="status">Calculating…</p>';
-    setTimeout(() => { if (my === token) calculate(); }, 20);
-  }, 220);
+    els.results.classList.add('busy');
+    setTimeout(() => { if (my !== token) return; calculate(); els.results.classList.remove('busy'); }, 20);
+  }, 150);
 }
 
 function calculate() {

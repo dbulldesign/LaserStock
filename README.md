@@ -4,9 +4,11 @@ Sheet nesting calculator for laser cutting circles. Enter a stock sheet and the
 circles you need; it works out how many sheets to use and order, and lays the
 circles out in even grids.
 
-Current version: **1.4.0**
+Current version: **1.4.1**
 
 ## Versions
+
+- **1.4.1** — Results update in place instead of blanking out, so the page no longer flashes or jumps when you change a setting.
 
 - **1.4.0** — Each circle size can be entered in inches or millimetres.
 - **1.3.0** — App icon, favicon and home-screen install.
