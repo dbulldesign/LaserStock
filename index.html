@@ -208,7 +208,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
       <div class="circ-head"><span></span><span>Diameter</span><span>Quantity</span><span></span></div>
       <div id="rows"></div>
       <button type="button" class="btn" id="add">Add another size</button>
-      <p class="hint">Largest circles are placed first. Sheets that come out identical are drawn once.</p>
+      <p class="hint">Each size is cut in an even grid of rows and columns, largest size first. Sheets that come out identical are drawn once.</p>
     </section>
   </aside>
 
@@ -219,11 +219,14 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.2.0';
 </script>
 <script>
-// Circle nesting engine: greedy largest-first placement with hex/square grid seeding
-// and tangent-candidate bottom-left heuristics. Coordinates: origin bottom-left.
+// Circle nesting engine: grid-only placement. Every size is cut in straight rows and
+// columns at an even pitch (diameter + spacing). On each sheet a size gets exactly one
+// rectangular grid block; blocks are packed largest size first into free rectangles
+// (guillotine splits), and anything that doesn't fit rolls onto the next sheet.
+// Coordinates: origin bottom-left.
 function nestCircles(opts) {
   const W = opts.W, H = opts.H, margin = Math.max(0, opts.margin || 0), gap = Math.max(0, opts.gap || 0);
   const sizes = opts.sizes; // [{d, q}]
@@ -235,175 +238,93 @@ function nestCircles(opts) {
   const tooBig = [];
   sizes.forEach((s, t) => { if (s.d > uW + eps || s.d > uH + eps) tooBig.push(t); });
   if (tooBig.length) return { error: 'too-big', tooBig };
+  if (!sizes.some(s => s.q > 0)) return { error: 'empty' };
 
-  const items = [];
-  sizes.forEach((s, t) => { for (let i = 0; i < s.q; i++) items.push({ r: s.d / 2, t }); });
-  if (!items.length) return { error: 'empty' };
-  items.sort((a, b) => (b.r - a.r) || (a.t - b.t));
-  const radii = [...new Set(items.map(i => i.r))].sort((a, b) => b - a);
-  const rmax = radii[0];
-  const cs = 2 * rmax + gap;
-  const KEY = 100003;
+  // Size indexes, largest first.
+  const order = sizes.map((s, t) => t).sort((a, b) => (sizes[b].d - sizes[a].d) || (a - b));
+  const fitCount = (len, p) => Math.floor((len + gap) / p + 1e-9); // circles of pitch p along len
 
-  function Grid() {
-    const map = new Map();
-    return {
-      add(c) {
-        const k = Math.floor(c.x / cs) * KEY + Math.floor(c.y / cs);
-        let a = map.get(k); if (!a) { a = []; map.set(k, a); } a.push(c);
-      },
-      each(x, y, range, fn) {
-        const i0 = Math.floor(x / cs), j0 = Math.floor(y / cs);
-        for (let i = i0 - range; i <= i0 + range; i++) for (let j = j0 - range; j <= j0 + range; j++) {
-          const a = map.get(i * KEY + j); if (!a) continue;
-          for (let q = 0; q < a.length; q++) if (fn(a[q])) return true;
-        }
-        return false;
-      }
-    };
-  }
-
-  function nAlong(len, step) { if (len < -eps) return 0; return Math.floor(Math.max(0, len) / step + 1e-9) + 1; }
-
-  function gridPositions(kind, r) {
-    const p = 2 * r + gap, s = p * Math.sqrt(3) / 2;
-    const x0 = margin + r, y0 = margin + r, xr = W - margin - r, yr = H - margin - r;
-    if (kind === 'sq') {
-      const nx = nAlong(xr - x0, p), ny = nAlong(yr - y0, p), out = [];
-      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) out.push([x0 + i * p, y0 + j * p]);
-      return out;
-    }
-    if (kind === 'hexr') {
-      const ny = nAlong(yr - y0, s);
-      const build = (par) => { const o = []; for (let j = 0; j < ny; j++) { const off = (j % 2 === par) ? p / 2 : 0; const nx = nAlong(xr - x0 - off, p); for (let i = 0; i < nx; i++) o.push([x0 + off + i * p, y0 + j * s]); } return o; };
-      const a = build(1), b = build(0); return a.length >= b.length ? a : b;
-    }
-    const nx = nAlong(xr - x0, s);
-    const build = (par) => { const o = []; for (let i = 0; i < nx; i++) { const off = (i % 2 === par) ? p / 2 : 0; const ny = nAlong(yr - y0 - off, p); for (let j = 0; j < ny; j++) o.push([x0 + i * s, y0 + off + j * p]); } return o; };
-    const a = build(1), b = build(0); return a.length >= b.length ? a : b;
-  }
-
-  const cmpBL = (a, b) => (Math.abs(a[1] - b[1]) > eps ? a[1] - b[1] : a[0] - b[0]);
-  const cmpLB = (a, b) => (Math.abs(a[0] - b[0]) > eps ? a[0] - b[0] : a[1] - b[1]);
-  const cmpCorner = (a, b) => { const da = a[0] * a[0] + a[1] * a[1], db = b[0] * b[0] + b[1] * b[1]; return Math.abs(da - db) > eps ? da - db : a[1] - b[1]; };
-
-  const STRATS = [
-    { name: 'Hex rows', grid: 'hexr', cmp: cmpBL },
-    { name: 'Hex columns', grid: 'hexc', cmp: cmpLB },
-    { name: 'Square grid', grid: 'sq', cmp: cmpBL },
-    { name: 'Bottom-left fill', grid: null, cmp: cmpBL },
-    { name: 'Left-bottom fill', grid: null, cmp: cmpLB },
-    { name: 'Corner fill', grid: null, cmp: cmpCorner },
-  ];
-
-  function packSheet(list, strat) {
-    const placed = [], leftover = [];
-    const grid = Grid();
-    const cand = new Map(radii.map(r => [r, []]));
-    const failed = new Set();
-    const toProcess = new Map(radii.map(r => [r, 0]));
-    for (const it of list) toProcess.set(it.r, toProcess.get(it.r) + 1);
-    const consumed = new Array(nTypes).fill(0);
+  // Pack one sheet. `swap` lays rows along the sheet height instead of the width;
+  // `tall` gives the space beside a block the full height instead of the space above it the full width.
+  function packSheet(rem, swap, tall) {
+    const SW = swap ? uH : uW, SH = swap ? uW : uH;
+    let free = [{ x: 0, y: 0, w: SW, h: SH }];
+    const placed = [], blocks = [], consumed = new Array(nTypes).fill(0);
     let area = 0, maxX = 0, maxY = 0;
-
-    function corners(rr) {
-      return [[margin + rr, margin + rr], [W - margin - rr, margin + rr], [margin + rr, H - margin - rr], [W - margin - rr, H - margin - rr]];
+    for (const t of order) {
+      const d = sizes[t].d, r = d / 2, p = d + gap;
+      let q = rem[t];
+      if (q > 0) {
+        // The free rectangle that takes the most of this size, so each size stays in
+        // as few grid blocks as possible (ties: bottom-most, then left-most).
+        let k = -1, kCap = 0;
+        free.forEach((f, i) => {
+          const cap = Math.min(q, fitCount(f.w, p) * fitCount(f.h, p));
+          if (cap > kCap || (cap === kCap && cap > 0 && ((f.y - free[k].y) || (f.x - free[k].x)) < 0)) { k = i; kCap = cap; }
+        });
+        if (k < 0) continue;
+        const f = free.splice(k, 1)[0];
+        const cols = fitCount(f.w, p), maxRows = fitCount(f.h, p);
+        const n = Math.min(q, cols * maxRows);
+        const usedCols = Math.min(cols, n), rows = Math.ceil(n / usedCols), last = n - (rows - 1) * usedCols;
+        for (let j = 0; j < rows; j++) {
+          const inRow = j === rows - 1 ? last : usedCols;
+          for (let i = 0; i < inRow; i++) {
+            const lx = f.x + r + i * p, ly = f.y + r + j * p;
+            const x = margin + (swap ? ly : lx), y = margin + (swap ? lx : ly);
+            placed.push({ x, y, r, t });
+            if (x + r > maxX) maxX = x + r; if (y + r > maxY) maxY = y + r;
+          }
+        }
+        blocks.push({ t, n, cols: usedCols, rows });
+        area += n * Math.PI * r * r; consumed[t] += n; q -= n;
+        // Split what is left of the rectangle (each piece starts one spacing clear of the circles).
+        const bw = usedCols * p, bh = rows * p;
+        if (tall) {
+          if (f.w - bw > 0) free.push({ x: f.x + bw, y: f.y, w: f.w - bw, h: f.h });                      // beside the block, full height
+          if (f.h - bh > 0) free.push({ x: f.x, y: f.y + bh, w: bw - gap, h: f.h - bh });                 // above the block
+          if (bw - last * p - gap > 0) free.push({ x: f.x + last * p, y: f.y + (rows - 1) * p, w: bw - last * p - gap, h: p - gap }); // end of last row
+        } else {
+          if (f.h - bh > 0) free.push({ x: f.x, y: f.y + bh, w: f.w, h: f.h - bh });                      // above the block, full width
+          if (rows > 1 && f.w - bw > 0) free.push({ x: f.x + bw, y: f.y, w: f.w - bw, h: (rows - 1) * p - gap }); // beside the full rows
+          if (f.w - last * p > 0) free.push({ x: f.x + last * p, y: f.y + (rows - 1) * p, w: f.w - last * p, h: p - gap }); // beside the last row
+        }
+        free = free.filter(g => g.w > eps && g.h > eps);
+      }
     }
-    function valid(x, y, r) {
-      if (x - r < margin - eps || x + r > W - margin + eps || y - r < margin - eps || y + r > H - margin + eps) return false;
-      return !grid.each(x, y, 1, (n) => { const dx = n.x - x, dy = n.y - y, m = n.r + r + gap - eps; return dx * dx + dy * dy < m * m; });
-    }
-    function addCands(c, rr, out) {
-      const R = c.r + rr + gap;
-      const xs = [margin + rr, W - margin - rr];
-      for (let k = 0; k < 2; k++) { const X = xs[k], dx = X - c.x; if (Math.abs(dx) <= R) { const dy = Math.sqrt(Math.max(0, R * R - dx * dx)); out.push([X, c.y + dy], [X, c.y - dy]); } }
-      const ys = [margin + rr, H - margin - rr];
-      for (let k = 0; k < 2; k++) { const Y = ys[k], dy = Y - c.y; if (Math.abs(dy) <= R) { const dx = Math.sqrt(Math.max(0, R * R - dy * dy)); out.push([c.x + dx, Y], [c.x - dx, Y]); } }
-      grid.each(c.x, c.y, 2, (n) => {
-        const R2 = n.r + rr + gap;
-        const dx = n.x - c.x, dy = n.y - c.y, d = Math.hypot(dx, dy);
-        if (d < eps || d > R + R2 + eps || d < Math.abs(R - R2) - eps) return false;
-        const a = (R * R - R2 * R2 + d * d) / (2 * d), h = Math.sqrt(Math.max(0, R * R - a * a));
-        const px = c.x + a * dx / d, py = c.y + a * dy / d;
-        out.push([px + h * dy / d, py - h * dx / d], [px - h * dy / d, py + h * dx / d]);
-        return false;
-      });
-    }
-    function place(x, y, r, t, gen) {
-      const c = { x, y, r, t };
-      if (gen) for (const rr of radii) if (!failed.has(rr) && toProcess.get(rr) > 0) addCands(c, rr, cand.get(rr));
-      grid.add(c); placed.push(c);
-      area += Math.PI * r * r; consumed[t]++;
-      if (x + r > maxX) maxX = x + r; if (y + r > maxY) maxY = y + r;
-    }
-    function findBest(r, cmp) {
-      const lst = cand.get(r); let best = null, k = 0;
-      for (let i = 0; i < lst.length; i++) { const p = lst[i]; if (valid(p[0], p[1], r)) { lst[k++] = p; if (!best || cmp(p, best) < 0) best = p; } }
-      lst.length = k; return best;
-    }
-
-    let queue = list;
-    if (strat.grid) {
-      const r0 = queue[0].r; let n0 = 0; while (n0 < queue.length && queue[n0].r === r0) n0++;
-      const pos = gridPositions(strat.grid, r0);
-      const take = Math.min(n0, pos.length), rest = queue.length - take;
-      for (let i = 0; i < take; i++) { toProcess.set(r0, toProcess.get(r0) - 1); place(pos[i][0], pos[i][1], r0, queue[i].t, rest > 0); }
-      queue = queue.slice(take);
-    }
-    for (const rr of radii) if (toProcess.get(rr) > 0) cand.get(rr).push(...corners(rr));
-
-    for (let idx = 0; idx < queue.length; idx++) {
-      const it = queue[idx]; toProcess.set(it.r, toProcess.get(it.r) - 1);
-      if (failed.has(it.r)) { leftover.push(it); continue; }
-      const p = findBest(it.r, strat.cmp);
-      if (!p) { failed.add(it.r); leftover.push(it); continue; }
-      place(p[0], p[1], it.r, it.t, true);
-    }
-    return { placed, leftover, area, consumed, maxX, maxY, strat: strat.name };
+    return { placed, blocks, consumed, area, maxX, maxY, swapped: swap };
   }
 
-  function better(res, best) {
-    if (!best) return true;
-    if (res.leftover.length === 0 && best.leftover.length === 0) return res.maxX * res.maxY < best.maxX * best.maxY - eps;
-    if (res.area > best.area + eps) return true;
-    if (Math.abs(res.area - best.area) <= eps) return res.placed.length > best.placed.length;
-    return false;
-  }
-  function countByType(list) { const c = new Array(nTypes).fill(0); for (const it of list) c[it.t]++; return c; }
-  function removeCounts(list, consumed, m) {
-    const skip = consumed.map(c => c * m), out = [];
-    for (const it of list) { if (skip[it.t] > 0) { skip[it.t]--; } else out.push(it); }
-    return out;
+  function better(a, b) {
+    if (a.area > b.area + eps) return true;
+    if (a.area < b.area - eps) return false;
+    return a.maxX * a.maxY < b.maxX * b.maxY - eps;
   }
 
+  const rem = sizes.map(s => s.q);
   const sheets = [];
-  let remaining = items, totalSheets = 0, iterations = 0, error = null, capped = false;
-  while (remaining.length && totalSheets < maxSheets) {
+  let totalSheets = 0, error = null, capped = false, iterations = 0;
+  while (rem.some(v => v > 0) && totalSheets < maxSheets) {
     if (++iterations > 600) { capped = true; break; }
-    const results = []; let best = null;
-    const first = packSheet(remaining, STRATS[0]); results.push(first); best = first;
-    const strats = first.placed.length > 2000 ? [STRATS[3]] : STRATS.slice(1);
-    for (const s of strats) { const res = packSheet(remaining, s); results.push(res); if (better(res, best)) best = res; }
-    if (!best || best.placed.length === 0) { error = 'stuck'; break; }
-    remaining = best.leftover;
-    let reps = 1;
-    if (remaining.length) {
-      const rem = countByType(remaining);
-      let m = 0;
-      const ok = (mm) => { for (const res of results) for (let t = 0; t < nTypes; t++) { if (rem[t] - mm * best.consumed[t] < res.consumed[t]) return false; } return true; };
-      while (m < maxSheets && ok(m)) m++;
-      if (m > 0) { remaining = removeCounts(remaining, best.consumed, m); reps += m; }
-    }
+    const results = [packSheet(rem, false, false), packSheet(rem, true, false), packSheet(rem, false, true), packSheet(rem, true, true)];
+    const best = results.reduce((b, res) => (better(res, b) ? res : b));
+    if (!best.placed.length) { error = 'stuck'; break; }
+    // While enough of every size remains, the next sheet comes out identical.
+    let reps = 0;
+    while (totalSheets + reps < maxSheets && results.every(res => res.consumed.every((c, t) => rem[t] - reps * best.consumed[t] >= c))) reps++;
+    reps = Math.max(1, reps);
     if (totalSheets + reps > maxSheets) { reps = maxSheets - totalSheets; capped = true; }
-    sheets.push({ placed: best.placed, reps, area: best.area, consumed: best.consumed, maxX: best.maxX, maxY: best.maxY, strat: best.strat });
+    for (let t = 0; t < nTypes; t++) rem[t] -= best.consumed[t] * reps;
+    sheets.push({ ...best, reps });
     totalSheets += reps;
     if (capped) break;
   }
-  if (remaining.length && !error) capped = true;
+  const unplaced = rem.reduce((a, v) => a + Math.max(0, v), 0);
+  if (unplaced && !error) capped = true;
 
-  const maxPerSheet = sizes.map(s => { const r = s.d / 2; return Math.max(gridPositions('sq', r).length, gridPositions('hexr', r).length, gridPositions('hexc', r).length); });
-  const totalArea = items.reduce((a, it) => a + Math.PI * it.r * it.r, 0);
-  return { sheets, totalSheets, totalArea, maxPerSheet, error, capped, unplaced: remaining.length };
+  const maxPerSheet = sizes.map(s => { const p = s.d + gap; return fitCount(uW, p) * fitCount(uH, p); });
+  const totalArea = sizes.reduce((a, s) => a + s.q * Math.PI * s.d * s.d / 4, 0);
+  return { sheets, totalSheets, totalArea, maxPerSheet, error, capped, unplaced };
 }
 
 
@@ -664,7 +585,7 @@ function renderResults(res, sizes, W, H, margin, gap) {
   let idx = 1;
   res.sheets.slice(0, MAX_DRAWN).forEach((sh) => {
     const title = sh.reps > 1 ? `Sheets ${count(idx)}–${count(idx + sh.reps - 1)} <span>(identical)</span>` : `Sheet ${count(idx)}`;
-    const parts = sizes.map((s, t) => sh.consumed[t] ? `${count(sh.consumed[t])} × ${dia(s.d)}` : null).filter(Boolean).join(', ');
+    const parts = gridParts(sh, sizes);
     const util = sh.area / sheetArea;
     html += `<div class="sheet-card"><h3>${title}</h3>${sheetSVG(sh, sizes, W, H, margin)}<p><b>${pct(util)} used.</b> ${parts}. Layout reaches ${fmt(sh.maxX)} × ${fmt(sh.maxY)} ${unitName()}.</p></div>`;
     idx += sh.reps;
@@ -680,7 +601,7 @@ function renderResults(res, sizes, W, H, margin, gap) {
     let i = 1;
     res.sheets.forEach((sh) => {
       const label = sh.reps > 1 ? `Sheets ${i}–${i + sh.reps - 1} (identical)` : `Sheet ${i}`;
-      const parts = sizes.map((s, t) => sh.consumed[t] ? `${sh.consumed[t]} × ${dia(s.d)}` : null).filter(Boolean).join(', ');
+      const parts = gridParts(sh, sizes);
       lines.push(`${label}: ${parts} — ${pct(sh.area / sheetArea)} used, layout ${fmt(sh.maxX)} × ${fmt(sh.maxY)} ${unitName()}`);
       i += sh.reps;
     });
@@ -690,6 +611,14 @@ function renderResults(res, sizes, W, H, margin, gap) {
   });
 }
 
+// "15 × Ø6 in (5 across × 3 up)" for each size's grid block on a sheet.
+function gridParts(sh, sizes) {
+  return sh.blocks.map(b => {
+    const across = sh.swapped ? b.rows : b.cols, up = sh.swapped ? b.cols : b.rows;
+    const full = across * up === b.n ? '' : ', last row partial';
+    return `${count(b.n)} × ${dia(sizes[b.t].d)} (${across} across × ${up} up${full})`;
+  }).join(', ');
+}
 function sheetSVG(sh, sizes, W, H, margin) {
   let s = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Layout of ${sh.placed.length} circles on the sheet">`;
   s += `<rect x="0" y="0" width="${W}" height="${H}" fill="var(--sheet)" stroke="var(--sheet-edge)" stroke-width="1" vector-effect="non-scaling-stroke"/>`;
