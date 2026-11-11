@@ -396,10 +396,13 @@ function nestCircles(opts) {
 // ---------- presets, state ----------
 // ---------- Stock materials: edit this list to add your own ----------
 // Give each one a name, width, height and the unit it is measured in.
+// If the stock is cut down before it goes in the laser, add `cut: { w, h }`
+// (same unit): circles are nested on the cut size, and the results also show
+// how many full stock sheets to order.
 // They appear at the top of the dropdown and convert when you switch units.
 const MATERIALS = [
   { name: 'Fade Not Poly', w: 24, h: 24, unit: 'in' },
-  { name: 'Brightview', w: 24, h: 72, unit: 'in' },
+  { name: 'Brightview', w: 24, h: 72, unit: 'in', cut: { w: 24, h: 36 } },
 ];
 // Generic sheet sizes listed after the named materials.
 const GENERIC = {
@@ -426,11 +429,30 @@ const GENERIC = {
     { label: '300 × 300 mm', w: 300, h: 300 },
   ],
 };
+// How many cut pieces of cw × ch come out of one full sheet of sw × sh (either orientation).
+function piecesPerStock(sw, sh, cw, ch) {
+  const eps = 1e-9;
+  const a = Math.floor(sw / cw + eps) * Math.floor(sh / ch + eps);
+  const b = Math.floor(sw / ch + eps) * Math.floor(sh / cw + eps);
+  return Math.max(a, b);
+}
+function currentStock() {
+  if (state.preset === 'custom') return null;
+  const p = presetsFor(state.unit)[state.preset];
+  return p && p.stock && p.w === state.w && p.h === state.h ? p.stock : null;
+}
 function roundTo(v, unit) { return unit === 'mm' ? Math.round(v * 10) / 10 : Math.round(v * 1000) / 1000; }
 function presetsFor(unit) {
   const mats = MATERIALS.map(m => {
     const f = m.unit === unit ? 1 : (unit === 'mm' ? 25.4 : 1 / 25.4);
     const w = roundTo(m.w * f, unit), h = roundTo(m.h * f, unit);
+    if (m.cut) {
+      // The laser sees the cut-down piece; the full sheet is what gets ordered.
+      const cw = roundTo(m.cut.w * f, unit), ch = roundTo(m.cut.h * f, unit);
+      const base = `${m.name} ${m.w} × ${m.h} ${m.unit}, cut to ${m.cut.w} × ${m.cut.h}`;
+      const label = m.unit === unit ? base : `${base} (${cw} × ${ch} ${unit})`;
+      return { label, w: cw, h: ch, stock: { name: m.name, w, h } };
+    }
     const label = m.unit === unit ? `${m.name} ${m.w} × ${m.h} ${m.unit}` : `${m.name} ${m.w} × ${m.h} ${m.unit} (${w} × ${h} ${unit})`;
     return { label, w, h };
   });
@@ -593,9 +615,22 @@ function renderResults(res, sizes, W, H, margin, gap) {
   const lastUtil = last.area / sheetArea;
   const placedCount = res.sheets.reduce((a, s) => a + s.placed.length * s.reps, 0);
   const sheetName = `${fmt(W)} × ${fmt(H)} ${unitName()}`;
+  const stock = currentStock();
+  let order = null;
+  if (stock) {
+    const per = piecesPerStock(stock.w, stock.h, W, H);
+    if (per > 0) {
+      const full = Math.ceil(n / per);
+      order = { per, full, spare: full * per - n, name: `${stock.name} ${fmt(stock.w)} × ${fmt(stock.h)} ${unitName()}` };
+    }
+  }
 
   let html = '';
-  html += `<h2 class="answer"><em>${count(n)} ${n === 1 ? 'sheet' : 'sheets'}</em> of ${sheetName}</h2>`;
+  if (order) {
+    html += `<h2 class="answer"><em>${count(order.full)} full ${order.full === 1 ? 'sheet' : 'sheets'}</em> to order</h2>`;
+    html += `<p class="answer-sub">${order.name}, cut into ${count(order.per)} pieces of ${sheetName} each. The job uses <b>${count(n)} cut ${n === 1 ? 'sheet' : 'sheets'}</b>${order.spare ? `, leaving ${count(order.spare)} spare cut ${order.spare === 1 ? 'piece' : 'pieces'}` : ''}.</p>`;
+  }
+  html += `<h2 class="answer"${order ? ' style="font-size:28px"' : ''}><em>${count(n)} ${order ? 'cut ' : ''}${n === 1 ? 'sheet' : 'sheets'}</em> of ${sheetName}</h2>`;
   let sub = `${count(placedCount)} circles, using ${pct(overall)} of the material overall.`;
   if (n > 1 || res.sheets.length > 1) sub += ` The last sheet is ${pct(lastUtil)} used, with its layout reaching ${fmt(last.maxX)} across and ${fmt(last.maxY)} up the sheet.`;
   else sub += ` The layout reaches ${fmt(last.maxX)} across and ${fmt(last.maxY)} up the sheet, so ${fmt(W - last.maxX)} ${unitName()} stays clear on the right and ${fmt(H - last.maxY)} ${unitName()} above.`;
@@ -625,7 +660,9 @@ function renderResults(res, sizes, W, H, margin, gap) {
   els.results.innerHTML = html;
 
   $('copy').addEventListener('click', async () => {
-    const lines = [`${count(n)} ${n === 1 ? 'sheet' : 'sheets'} of ${sheetName}`, `Spacing ${fmt(gap)} ${unitName()} between circles, ${fmt(margin)} ${unitName()} from the edge`, `${count(placedCount)} circles, ${pct(overall)} of material used overall`, ''];
+    const lines = [];
+    if (order) lines.push(`Order ${count(order.full)} full ${order.full === 1 ? 'sheet' : 'sheets'} of ${order.name} (${count(order.per)} cut pieces each${order.spare ? `, ${count(order.spare)} spare` : ''})`);
+    lines.push(`${count(n)} ${order ? 'cut ' : ''}${n === 1 ? 'sheet' : 'sheets'} of ${sheetName}`, `Spacing ${fmt(gap)} ${unitName()} between circles, ${fmt(margin)} ${unitName()} from the edge`, `${count(placedCount)} circles, ${pct(overall)} of material used overall`, '');
     let i = 1;
     res.sheets.forEach((sh) => {
       const label = sh.reps > 1 ? `Sheets ${i}–${i + sh.reps - 1} (identical)` : `Sheet ${i}`;
