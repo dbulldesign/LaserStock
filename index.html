@@ -105,6 +105,9 @@ button, input, select { font: inherit; color: inherit; }
 .seg button { background: var(--surface); border: 0; padding: 7px 14px; cursor: pointer; color: var(--muted); }
 .top-actions { margin-left: auto; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .top-actions .seg { margin-left: 0; }
+.top-actions .status { font-size: 13px; color: var(--muted); }
+.job-name { margin: 0 0 4px; font-size: 14px; color: var(--muted); font-weight: 500; }
+body.dragging .results { outline: 2px dashed var(--accent); outline-offset: -8px; }
 .seg-full { display: flex; margin: 6px 0 0; }
 .seg-full button { flex: 1; padding: 7px 6px; }
 .layout.collapsed { grid-template-columns: minmax(0, 1fr); }
@@ -192,6 +195,10 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
     <p>Enter your stock sheet and the circles you need. It works out how many sheets to buy, how much of each sheet gets used, and lays the circles out for you.</p>
   </div>
   <div class="top-actions">
+  <span class="status" id="fileStatus" role="status"></span>
+  <button type="button" class="btn" id="openBtn" title="Open a saved job file (.json)">Open…</button>
+  <button type="button" class="btn" id="saveBtn" title="Save all settings and the calculated sheets to a file">Save</button>
+  <input type="file" id="fileIn" accept=".json,application/json" hidden>
   <button type="button" class="btn" id="panelBtn" aria-controls="controls" aria-expanded="true"><span aria-hidden="true">☰</span> <span id="panelLbl">Hide settings</span></button>
   <div class="seg" id="unitSeg" role="group" aria-label="Sheet and spacing units">
     <button type="button" data-unit="in" aria-pressed="true">inches</button>
@@ -202,6 +209,10 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 
 <main class="layout">
   <aside class="controls" id="controls" aria-label="Inputs">
+    <section class="group">
+      <h2>Job</h2>
+      <label class="field"><span>Job name (used for the saved file)</span><input id="jobName" class="len" type="text" autocomplete="off" placeholder="e.g. Lobby pendants, order 1042"></label>
+    </section>
     <section class="group">
       <h2>Stock sheet</h2>
       <label class="field"><span>Size</span><select id="preset"></select></label>
@@ -228,7 +239,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
           <button type="button" data-layout="stagger" aria-pressed="false">Staggered</button>
         </div>
       </div>
-      <p class="hint">Rows are always straight. Staggered shifts every other row by half a circle so rows nest closer; Best fit uses it only where it fits more.</p>
+      <p class="hint">Rows are always straight. Staggered rows run across the sheet width, with every other row shifted half a circle so they nest closer; Best fit uses that only where it fits more.</p>
     </section>
 
     <section class="group circles">
@@ -248,7 +259,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows at an
@@ -324,7 +335,7 @@ function nestCircles(opts) {
       let k = -1, kCap = 0, kStag = false;
       free.forEach((f, i) => {
         const sq = pattern === 'stagger' ? 0 : Math.min(q, squareFit(f, p).cap);
-        const st = pattern === 'square' ? 0 : Math.min(q, staggerFit(f, d, p).cap);
+        const st = pattern === 'square' || swap ? 0 : Math.min(q, staggerFit(f, d, p).cap); // staggered rows only run across the sheet width
         const cap = Math.max(sq, st), stag = st > sq;
         if (cap > kCap || (cap === kCap && cap > 0 && ((f.y - free[k].y) || (f.x - free[k].x)) < 0)) { k = i; kCap = cap; kStag = stag; }
       });
@@ -380,7 +391,10 @@ function nestCircles(opts) {
   while (rem.some(v => v > 0) && totalSheets < maxSheets) {
     if (++iterations > 600) { capped = true; break; }
     const results = [];
-    for (const pat of patterns) for (const [sw, tl] of [[false, false], [true, false], [false, true], [true, true]]) results.push(packSheet(rem, sw, tl, pat));
+    for (const pat of patterns) for (const [sw, tl] of [[false, false], [true, false], [false, true], [true, true]]) {
+      if (sw && pat !== 'square') continue; // staggered rows always run across the width, so they are never turned
+      results.push(packSheet(rem, sw, tl, pat));
+    }
     const best = results.reduce((b, res) => (better(res, b) ? res : b));
     if (!best.placed.length) { error = 'stuck'; break; }
     // While enough of every size remains, the next sheet comes out identical.
@@ -401,7 +415,7 @@ function nestCircles(opts) {
     for (const [w, h] of [[uW, uH], [uH, uW]]) {
       const f = { x: 0, y: 0, w, h };
       if (layout !== 'stagger') best = Math.max(best, squareFit(f, p).cap);
-      if (layout !== 'square') best = Math.max(best, staggerFit(f, s.d, p).cap);
+      if (layout !== 'square' && w === uW) best = Math.max(best, staggerFit(f, s.d, p).cap); // across the width only
     }
     return best;
   });
@@ -491,6 +505,7 @@ const state = {
   gap: 2 / 25.4,     // default 2 mm between circles (page starts in inches)
   margin: 10 / 25.4, // default 10 mm from the sheet edge
   layout: 'best',    // 'best' | 'square' | 'stagger'
+  name: '',          // job name, used for the saved file
   circles: [{ d: 6, q: 12, u: 'in' }, { d: 3, q: 24, u: 'in' }], // each circle keeps its own unit
 };
 
@@ -667,7 +682,9 @@ function schedule() {
   }, 150);
 }
 
+let lastRender = null; // the most recent good result, written into saved files
 function calculate() {
+  lastRender = null;
   const W = state.w, H = state.h, margin = state.margin, gap = state.gap;
   const sizes = state.circles.map((c, i) => ({ d: toSheetUnit(c.d, c.u), q: c.q, i, label: diaOf(c) })).filter(c => c.d > 0 && c.q > 0);
   if (!(W > 0 && H > 0)) { els.results.innerHTML = '<p class="empty">Enter a sheet width and height to start.</p>'; return; }
@@ -704,7 +721,10 @@ function renderResults(res, sizes, W, H, margin, gap) {
     }
   }
 
+  lastRender = { res, sizes, W, H, margin, gap, order, overall, placedCount };
+
   let html = '';
+  if (state.name) html += `<p class="job-name">${esc(state.name)}</p>`;
   if (order) {
     html += `<h2 class="answer"><em>${count(order.full)} full ${order.full === 1 ? 'sheet' : 'sheets'}</em> to order</h2>`;
     html += `<p class="answer-sub">${order.name}, cut into ${count(order.per)} pieces of ${sheetName} each. The job uses <b>${count(n)} cut ${n === 1 ? 'sheet' : 'sheets'}</b>${order.spare ? `, leaving ${count(order.spare)} spare cut ${order.spare === 1 ? 'piece' : 'pieces'}` : ''}.</p>`;
@@ -740,6 +760,7 @@ function renderResults(res, sizes, W, H, margin, gap) {
 
   $('copy').addEventListener('click', async () => {
     const lines = [];
+    if (state.name) lines.push(state.name);
     if (order) lines.push(`Order ${count(order.full)} full ${order.full === 1 ? 'sheet' : 'sheets'} of ${order.name} (${count(order.per)} cut pieces each${order.spare ? `, ${count(order.spare)} spare` : ''})`);
     lines.push(`${count(n)} ${order ? 'cut ' : ''}${n === 1 ? 'sheet' : 'sheets'} of ${sheetName}`, `Spacing ${fmt(gap)} ${unitName()} between circles, ${fmt(margin)} ${unitName()} from the edge`, `${count(placedCount)} circles, ${pct(overall)} of material used overall`, '');
     let i = 1;
@@ -825,6 +846,119 @@ setPanel(panelOpen);
 $('panelBtn').addEventListener('click', () => {
   panelOpen = !panelOpen; setPanel(panelOpen);
   try { localStorage.setItem('laserstock.panel', panelOpen ? 'open' : 'closed'); } catch {}
+});
+
+// ---------- save / open job files ----------
+// A job file is JSON: every setting needed to rebuild the job, plus the calculated
+// sheets (for reference; they are recalculated when the file is opened).
+const FILE_FORMAT = 1;
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const round4 = (v) => Math.round(v * 10000) / 10000;
+function flash(msg) { const el = $('fileStatus'); el.textContent = msg; clearTimeout(flash.t); flash.t = setTimeout(() => { el.textContent = ''; }, 4000); }
+
+function buildJobFile() {
+  const presetLabel = state.preset === 'custom' ? 'Custom size' : (presetsFor(state.unit)[state.preset] || {}).label || 'Custom size';
+  const job = {
+    app: 'LaserStock', format: FILE_FORMAT, appVersion: APP_VERSION, savedAt: new Date().toISOString(),
+    name: state.name,
+    settings: {
+      unit: state.unit, preset: presetLabel,
+      sheet: { width: state.w, height: state.h },                         // full precision, so reopening
+      spacing: { betweenCircles: state.gap, fromEdge: state.margin },     // gives exactly the same layout
+      layout: state.layout,
+      circles: state.circles.map(c => ({ diameter: c.d, unit: c.u, quantity: c.q })),
+    },
+  };
+  if (lastRender) {
+    const { res, sizes, W, H, order, overall, placedCount } = lastRender;
+    let idx = 1;
+    job.results = {
+      note: `Coordinates are circle centres in ${state.unit}, measured from the bottom-left corner of the sheet.`,
+      sheetSize: { width: round4(W), height: round4(H), unit: state.unit },
+      sheetsUsed: res.totalSheets,
+      fullSheetsToOrder: order ? { count: order.full, stock: order.name, piecesPerSheet: order.per, spare: order.spare } : null,
+      circles: placedCount,
+      materialUsed: round4(overall),
+      sheets: res.sheets.map(sh => {
+        const label = sh.reps > 1 ? `Sheets ${idx}–${idx + sh.reps - 1}` : `Sheet ${idx}`; idx += sh.reps;
+        return {
+          label, copies: sh.reps, used: round4(sh.area / (W * H)), contents: gridParts(sh, sizes),
+          circles: sh.placed.map(c => ({ size: sizes[c.t].label, x: round4(c.x), y: round4(c.y), diameter: round4(2 * c.r) })),
+        };
+      }),
+    };
+  }
+  return job;
+}
+function jobFileName() {
+  const base = (state.name || 'laserstock-job').trim().replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').slice(0, 80) || 'laserstock-job';
+  return `${base} ${new Date().toISOString().slice(0, 10)}.json`;
+}
+async function saveJob() {
+  const text = JSON.stringify(buildJobFile(), null, 2);
+  const name = jobFileName();
+  if (window.showSaveFilePicker) {
+    try {
+      const h = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: 'LaserStock job', accept: { 'application/json': ['.json'] } }] });
+      const w = await h.createWritable(); await w.write(text); await w.close();
+      flash(`Saved ${h.name}`); return;
+    } catch (e) { if (e && e.name === 'AbortError') return; /* fall back to a download */ }
+  }
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  flash(`Saved ${name}`);
+}
+
+function applyJob(job) {
+  if (!job || job.app !== 'LaserStock' || !job.settings) throw new Error('This isn’t a LaserStock job file.');
+  const st = job.settings, num = (v, min) => (typeof v === 'number' && isFinite(v) && v >= min ? v : null);
+  const unit = st.unit === 'mm' ? 'mm' : 'in';
+  const w = num(st.sheet && st.sheet.width, 0), h = num(st.sheet && st.sheet.height, 0);
+  if (!w || !h) throw new Error('The file has no sheet size.');
+  const circles = Array.isArray(st.circles) ? st.circles.map(c => ({
+    d: num(c.diameter, 0) || 0, u: c.unit === 'mm' ? 'mm' : 'in', q: Math.floor(num(c.quantity, 0) || 0),
+  })) : [];
+  state.unit = unit; state.w = w; state.h = h;
+  state.gap = num(st.spacing && st.spacing.betweenCircles, 0) ?? state.gap;
+  state.margin = num(st.spacing && st.spacing.fromEdge, 0) ?? state.margin;
+  state.layout = ['best', 'square', 'stagger'].includes(st.layout) ? st.layout : 'best';
+  state.circles = circles.length ? circles : [{ d: unit === 'mm' ? 100 : 4, q: 10, u: unit }];
+  state.name = typeof job.name === 'string' ? job.name : '';
+  const presets = presetsFor(unit);
+  let match = presets.findIndex(p => p.label === st.preset && p.w === w && p.h === h);
+  if (match < 0) match = presets.findIndex(p => p.w === w && p.h === h);
+  state.preset = match >= 0 ? match : 'custom';
+  buildPresetOptions(); syncUnitsUI(); syncInputs(); renderRows(); syncLayoutUI();
+  $('jobName').value = state.name;
+  calculate();
+}
+async function openJobFile(file) {
+  try {
+    applyJob(JSON.parse(await file.text()));
+    flash(`Opened ${file.name}`);
+  } catch (e) {
+    flash(`Couldn’t open ${file.name}: ${e instanceof SyntaxError ? 'the file isn’t valid JSON.' : e.message}`);
+  }
+}
+$('saveBtn').addEventListener('click', saveJob);
+$('openBtn').addEventListener('click', () => $('fileIn').click());
+$('fileIn').addEventListener('change', () => { const f = $('fileIn').files[0]; if (f) openJobFile(f); $('fileIn').value = ''; });
+$('jobName').addEventListener('input', () => { state.name = $('jobName').value; schedule(); });
+// Drop a job file anywhere on the page to open it.
+document.addEventListener('dragover', (e) => { if ([...e.dataTransfer.types].includes('Files')) { e.preventDefault(); document.body.classList.add('dragging'); } });
+document.addEventListener('dragleave', (e) => { if (!e.relatedTarget) document.body.classList.remove('dragging'); });
+document.addEventListener('drop', (e) => {
+  document.body.classList.remove('dragging');
+  const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (!f) return;
+  e.preventDefault(); openJobFile(f);
+});
+// Ctrl/Cmd+S saves, Ctrl/Cmd+O opens.
+document.addEventListener('keydown', (e) => {
+  if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 's') { e.preventDefault(); saveJob(); }
+  if (k === 'o') { e.preventDefault(); $('fileIn').click(); }
 });
 
 // ---------- init ----------
