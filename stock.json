@@ -125,7 +125,7 @@
   {
    "id": "mwcpjnptdowb6",
    "name": "North Market",
-   "at": "2026-11-11T22:50:08.480Z",
+   "at": "2026-11-11T22:52:08.834Z",
    "parts": [
     {
      "matId": "mwcoofruic945",
@@ -133,12 +133,19 @@
      "sheets": 9,
      "circles": 1251,
      "summary": "1,050 × MR16 (Ø1.9375 in), 25 × Ø1.125 in, 40 × Ø35 mm, 4 × Ø21 mm, 20 × Ø26.5 mm, 12 × Ø1.375 in, 25 × Ø1.85 in, 15 × Ø2.25 in, 50 × Ø1.54 in, 10 × Ø19.6 mm"
+    },
+    {
+     "matId": "mwcoofruljgme",
+     "material": "Fade Not Poly - R02",
+     "sheets": 5,
+     "circles": 625,
+     "summary": "610 × MR16 (Ø1.9375 in), 5 × Ø21.86 mm, 5 × Ø1.85 in, 5 × Ø1.54 in"
     }
    ],
    "settings": {
     "unit": "in",
-    "preset": "Fade Not Poly - R3409 - 24 × 24 in",
-    "material": "Fade Not Poly - R3409",
+    "preset": "Fade Not Poly - R02 - 24 × 24 in",
+    "material": "Fade Not Poly - R02",
     "sheet": {
      "width": 24,
      "height": 24
@@ -152,53 +159,23 @@
      {
       "diameter": 1.9375,
       "unit": "in",
-      "quantity": 1050,
+      "quantity": 610,
       "name": "MR16"
      },
      {
-      "diameter": 1.125,
-      "unit": "in",
-      "quantity": 25
-     },
-     {
-      "diameter": 35,
+      "diameter": 21.86,
       "unit": "mm",
-      "quantity": 40
-     },
-     {
-      "diameter": 21,
-      "unit": "mm",
-      "quantity": 4
-     },
-     {
-      "diameter": 26.5,
-      "unit": "mm",
-      "quantity": 20
-     },
-     {
-      "diameter": 1.375,
-      "unit": "in",
-      "quantity": 12
+      "quantity": 5
      },
      {
       "diameter": 1.85,
       "unit": "in",
-      "quantity": 25
-     },
-     {
-      "diameter": 2.25,
-      "unit": "in",
-      "quantity": 15
+      "quantity": 5
      },
      {
       "diameter": 1.54,
       "unit": "in",
-      "quantity": 50
-     },
-     {
-      "diameter": 19.6,
-      "unit": "mm",
-      "quantity": 10
+      "quantity": 5
      }
     ],
     "parts": [
@@ -263,9 +240,41 @@
         "quantity": 10
        }
       ]
+     },
+     {
+      "material": "Fade Not Poly - R02",
+      "preset": "Fade Not Poly - R02 - 24 × 24 in",
+      "sheet": {
+       "width": 24,
+       "height": 24,
+       "unit": "in"
+      },
+      "circles": [
+       {
+        "diameter": 1.9375,
+        "unit": "in",
+        "quantity": 610,
+        "name": "MR16"
+       },
+       {
+        "diameter": 21.86,
+        "unit": "mm",
+        "quantity": 5
+       },
+       {
+        "diameter": 1.85,
+        "unit": "in",
+        "quantity": 5
+       },
+       {
+        "diameter": 1.54,
+        "unit": "in",
+        "quantity": 5
+       }
+      ]
      }
     ],
-    "active": 0
+    "active": 1
    }
   }
  ],
