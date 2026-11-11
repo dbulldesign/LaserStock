@@ -422,7 +422,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.17.0';
+const APP_VERSION = '1.17.1';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows at an
@@ -1027,7 +1027,7 @@ function jobCard() {
     comp.forEach((c, i) => {
       const pl = c.m ? planFor(c.m, c.n) : null;
       html += `<tr data-part="${i}" class="${i === state.active ? 'on' : ''}"><td>${esc(partName(parts[i]))}</td><td class="num">${count(c.placed || partCount(parts[i]))}</td>
-        <td class="num">${c.res ? count(c.n) : '–'}</td><td class="num">${pl ? count(pl.full) : '–'}</td><td class="num">${c.m ? count(c.m.stock) : '–'}</td>
+        <td class="num">${c.res ? count(c.n) : '–'}</td><td class="num">${c.m ? fmtFull(fullUsed(c.m, c.n)) : '–'}</td><td class="num">${c.m ? count(c.m.stock) : '–'}</td>
         <td class="num ${pl && pl.toOrder ? 'order' : ''}">${pl ? (pl.toOrder ? count(pl.toOrder) : 'Nothing') : (c.m ? '–' : 'not tracked')}</td></tr>`;
     });
     html += '</tbody></table>';
@@ -1098,8 +1098,8 @@ function renderResults(res, sizes, W, H, margin, gap) {
   if (state.name) html += `<p class="job-name">${esc(state.name)}</p>`;
   const pl = (k, one, many) => `${count(k)} ${k === 1 ? one : many}`;
   if (order && order.cut) {
-    html += `<h2 class="answer"><em>${pl(order.full, 'full sheet', 'full sheets')}</em> of ${esc(order.m.name)}</h2>`;
-    html += `<p class="answer-sub">${esc(order.name)}, cut into ${count(order.per)} pieces of ${sheetName} each. The job uses <b>${pl(n, 'cut sheet', 'cut sheets')}</b>${order.fromSpare ? ` (${count(order.fromSpare)} from spare pieces in stock)` : ''}${order.spare ? `, leaving ${pl(order.spare, 'new spare cut piece', 'new spare cut pieces')}` : ''}.</p>`;
+    html += `<h2 class="answer"><em>${fullTxt(order.m, n)}</em> of ${esc(order.m.name)}</h2>`;
+    html += `<p class="answer-sub">${esc(order.name)}, cut into ${count(order.per)} pieces of ${sheetName} each. The job uses <b>${pl(n, 'cut sheet', 'cut sheets')} = ${fullTxt(order.m, n)}</b>${order.fromSpare ? ` (${pl(order.fromSpare, 'piece', 'pieces')} from spares in stock)` : ''}.${order.full ? ` That means cutting ${pl(order.full, 'full sheet', 'full sheets')}${order.spare ? `, leaving ${pl(order.spare, 'spare cut piece', 'spare cut pieces')} for later` : ''}.` : ''}</p>`;
   }
   html += `<h2 class="answer"${order && order.cut ? ' style="font-size:28px"' : ''}><em>${count(n)} ${order && order.cut ? 'cut ' : ''}${n === 1 ? 'sheet' : 'sheets'}</em> of ${order && !order.cut ? esc(order.m.name) + ' ' : ''}${sheetName}</h2>`;
   if (order) {
@@ -1114,7 +1114,7 @@ function renderResults(res, sizes, W, H, margin, gap) {
       const others = plannedFor(m.id, state.jobId), on = others.reduce((a, x) => a + x.sheets, 0);
       if (!others.length) return '';
       const all = planFor(m, n + on);
-      return `<p class="planned">Planned jobs for ${esc(m.name)}: ${pl(others.length, 'other job needs', 'other jobs need')} ${pl(on, order.cut ? 'cut sheet' : 'sheet', order.cut ? 'cut sheets' : 'sheets')}. With this one that’s <b>${pl(all.full, ...unitWord)}</b>: ${all.toOrder ? `order <b>${pl(all.toOrder, ...unitWord)}</b>` : 'enough in stock'}.</p>`;
+      return `<p class="planned">Planned jobs for ${esc(m.name)}: ${pl(others.length, 'other job needs', 'other jobs need')} ${pl(on, order.cut ? 'cut sheet' : 'sheet', order.cut ? 'cut sheets' : 'sheets')}. With this one that’s <b>${fullTxt(m, n + on)}</b>: ${all.toOrder ? `order <b>${pl(all.toOrder, ...unitWord)}</b>` : 'enough in stock'}.</p>`;
     })()}
     </div>`;
   }
@@ -1150,7 +1150,7 @@ function renderResults(res, sizes, W, H, margin, gap) {
   $('copy').addEventListener('click', async () => {
     const lines = [];
     if (state.name) lines.push(state.name);
-    if (order) lines.push(`${order.cut ? 'Full sheets needed' : 'Sheets needed'}: ${count(order.full)} of ${order.name}${order.cut ? ` (${count(order.per)} cut pieces each${order.fromSpare ? `, plus ${count(order.fromSpare)} spare pieces from stock` : ''}${order.spare ? `, ${count(order.spare)} new spare` : ''})` : ''}`,
+    if (order) lines.push(`${order.cut ? 'Full sheets used' : 'Sheets used'}: ${fmtFull(fullUsed(order.m, n))} of ${order.name}${order.cut ? ` (${count(n)} cut sheets, ${count(order.per)} per full sheet${order.fromSpare ? `; ${count(order.fromSpare)} from spare pieces` : ''}; cut ${count(order.full)} full${order.spare ? `, ${count(order.spare)} spare left` : ''})` : ''}`,
       `In stock ${count(order.m.stock)}, after this job ${count(order.after.stock)}, to order ${count(order.toOrder)}`);
     lines.push(`${count(n)} ${order && order.cut ? 'cut ' : ''}${n === 1 ? 'sheet' : 'sheets'} of ${sheetName}`, `Spacing ${spacingLabel(gap)} between circles, ${spacingLabel(margin)} from the edge`, `${count(placedCount)} circles, ${pct(overall)} of material used overall`, '');
     let i = 1;
@@ -1267,7 +1267,7 @@ function buildJobFile(withResults = true) {
   };
   if (!withResults) return job;
   job.materials = state.parts.map(p => { const c = computePart(p); return { material: partName(p), laserSheets: c.n, circles: c.placed,
-    fullSheets: c.m ? planFor(c.m, c.n).full : null, contents: c.summary }; });
+    fullSheetsUsed: c.m ? Math.round(fullUsed(c.m, c.n) * 100) / 100 : null, contents: c.summary }; });
   if (lastRender) {
     const { res, sizes, W, H, order, overall, placedCount } = lastRender;
     let idx = 1;
@@ -1276,7 +1276,7 @@ function buildJobFile(withResults = true) {
       sheetSize: { width: round4(W), height: round4(H), unit: state.unit },
       sheetsUsed: res.totalSheets,
       material: order ? { name: order.m.name, fullSheet: order.name, piecesPerFullSheet: order.cut ? order.per : null,
-        fullSheetsNeeded: order.full, spareUsedFromStock: order.fromSpare, newSparePieces: order.spare,
+        fullSheetsUsed: Math.round(fullUsed(order.m, n) * 100) / 100, fullSheetsToCut: order.full, spareUsedFromStock: order.fromSpare, newSparePieces: order.spare,
         inStockWhenSaved: order.m.stock, toOrder: order.toOrder } : null,
       circles: placedCount,
       materialUsed: round4(overall),
@@ -1658,6 +1658,19 @@ $('histList').addEventListener('click', (e) => {
 
 // Sheets a material needs for n laser sheets: spare cut pieces first, then full sheets.
 const perOf = (m) => (m.cut ? piecesPerStock(m.w, m.h, m.cut.w, m.cut.h) || 1 : 1);
+// Full sheets actually used by n laser sheets: 3 Brightview pieces = 1.5 full sheets. Whole sheets
+// only matter for what is cut from stock or bought; the rest of a cut sheet becomes a spare piece.
+const fmtFull = (x) => (Math.round(x * 100) / 100).toLocaleString('en-US', { maximumFractionDigits: 2 });
+const fullUsed = (m, n) => n / perOf(m);
+const fullTxt = (m, n) => { const x = fullUsed(m, n); return `${fmtFull(x)} ${m.cut ? 'full ' : ''}${x === 1 ? 'sheet' : 'sheets'}`; };
+// One line for a mark-as-cut confirmation, e.g. "Brightview - Narrow: uses 1.5 full sheets
+// (3 cut sheets): takes 2 full sheets out of stock and adds 1 spare cut piece".
+function cutLine(m, n) {
+  const pl = planFor(m, n), s = (k, a, b) => `${count(k)} ${k === 1 ? a : b}`;
+  if (!m.cut) return `${m.name}: ${s(n, 'sheet', 'sheets')}${pl.full > m.stock ? ` (stock only shows ${count(m.stock)}, goes to 0)` : ''}`;
+  const take = [pl.full ? s(pl.full, 'full sheet', 'full sheets') : '', pl.fromSpare ? s(pl.fromSpare, 'spare cut piece', 'spare cut pieces') : ''].filter(Boolean).join(' and ');
+  return `${m.name}: uses ${fullTxt(m, n)} (${s(n, 'cut sheet', 'cut sheets')}): takes ${take} out of stock${pl.newSpare ? ` and adds ${s(pl.newSpare, 'spare cut piece', 'spare cut pieces')}` : ''}${pl.full > m.stock ? ` (stock only shows ${count(m.stock)} full, goes to 0)` : ''}`;
+}
 function planFor(m, n) {
   const per = perOf(m), fromSpare = m.cut ? Math.min(m.spare, n) : 0;
   const full = Math.ceil((n - fromSpare) / per), newSpare = m.cut ? full * per - (n - fromSpare) : 0;
@@ -1682,9 +1695,7 @@ function markJobCut() {
   const skipped = comp.map((c, i) => ({ c, p: parts[i] })).filter(x => !x.c.m && x.c.n).map(x => partName(x.p));
   if (!cuts.length) { alert('None of the materials in this job are tracked in stock. Pick materials from the Size list.'); return; }
   const lines = cuts.map(({ c }) => {
-    const pl = planFor(c.m, c.n), bits = [`${count(pl.full)} ${c.m.cut ? 'full ' : ''}${pl.full === 1 ? 'sheet' : 'sheets'}`];
-    if (pl.fromSpare) bits.push(`${count(pl.fromSpare)} spare cut ${pl.fromSpare === 1 ? 'piece' : 'pieces'}`);
-    return `• ${c.m.name}: ${bits.join(' and ')}${pl.newSpare ? ` (adds ${count(pl.newSpare)} new spare)` : ''}${pl.full > c.m.stock ? ` — stock only shows ${count(c.m.stock)}, goes to 0` : ''}`;
+    return `• ${cutLine(c.m, c.n)}`;
   });
   let msg = `Take this job out of stock?\n\n${lines.join('\n')}`;
   if (skipped.length) msg += `\n\nNot tracked in stock, so skipped: ${skipped.join(', ')}.`;
@@ -1713,9 +1724,9 @@ function renderJobs() {
   $('buyList').innerHTML = rows.length ? `<table class="buy"><thead><tr><th>Material</th><th class="num">Jobs</th><th class="num">Jobs need</th><th class="num">In stock</th><th class="num">To buy</th></tr></thead><tbody>${rows.map(e => `
     <tr><td>${esc(e.m.name)}<br><small class="hint">${fmt(e.m.w)} × ${fmt(e.m.h)} ${e.m.unit}${e.m.cut ? `, ${count(e.plan.per)} cut pieces each` : ''}${incReorder && e.m.reorderAt ? ` · reorder level ${count(e.m.reorderAt)}` : ''}</small></td>
     <td class="num">${count(e.jobs)}</td>
-    <td class="num">${unitW(e.m, e.plan.full)}${e.m.cut ? `<br><small class="hint">${count(e.n)} cut sheets${e.plan.fromSpare ? `, ${count(e.plan.fromSpare)} from spares` : ''}</small>` : ''}</td>
+    <td class="num">${fullTxt(e.m, e.n)}${e.m.cut ? `<br><small class="hint">${count(e.n)} cut sheets${e.plan.fromSpare ? `, ${count(e.plan.fromSpare)} from spares` : ''}</small>` : ''}</td>
     <td class="num">${unitW(e.m, e.m.stock)}${e.m.cut && e.m.spare ? `<br><small class="hint">+ ${count(e.m.spare)} spare pieces</small>` : ''}</td>
-    <td class="num ${e.buy ? 'order' : ''}">${e.buy ? unitW(e.m, e.buy) : 'Nothing'}</td></tr>`).join('')}</tbody></table>`
+    <td class="num ${e.buy ? 'order' : ''}">${e.buy ? unitW(e.m, e.buy) : 'Nothing'}${e.buy && e.m.cut && e.plan.newSpare ? `<br><small class="hint">whole sheets; ${count(e.plan.newSpare)} spare piece${e.plan.newSpare === 1 ? '' : 's'} left over</small>` : ''}</td></tr>`).join('')}</tbody></table>`
     : '<p class="empty">No planned jobs yet, so nothing to buy.</p>';
   const dups = dupNames();
   const groups = [...dups].map(k => jobs.filter(j => normName(j.name) === k));
@@ -1724,12 +1735,12 @@ function renderJobs() {
     + (jobs.length ? jobs.map(j => {
     let laser = 0, full = 0, fullKnown = true;
     const rows = j.parts.map(p => {
-      const m = inv.materials.find(x => x.id === p.matId), f = m ? Math.ceil(p.sheets / perOf(m)) : null;
+      const m = inv.materials.find(x => x.id === p.matId), f = m ? fullUsed(m, p.sheets) : null;
       laser += p.sheets; if (f == null) fullKnown = false; else full += f;
       return `<tr><td>${esc(m ? m.name : `${p.material} (no longer in the list)`)}<br><small class="hint">${esc(p.summary)}</small></td><td class="num">${count(p.circles)}</td>
-        <td class="num">${count(p.sheets)}${m && m.cut ? '<small class="hint"> cut</small>' : ''}</td><td class="num"><b>${f == null ? '–' : count(f)}</b></td></tr>`;
+        <td class="num">${count(p.sheets)}${m && m.cut ? '<small class="hint"> cut</small>' : ''}</td><td class="num"><b>${f == null ? '–' : fmtFull(f)}</b></td></tr>`;
     }).join('');
-    const total = j.parts.length > 1 ? `<tr class="total"><td>Total</td><td class="num">${count(j.parts.reduce((a, p) => a + p.circles, 0))}</td><td class="num">${count(laser)}</td><td class="num"><b>${fullKnown ? count(full) : '–'}</b></td></tr>` : '';
+    const total = j.parts.length > 1 ? `<tr class="total"><td>Total</td><td class="num">${count(j.parts.reduce((a, p) => a + p.circles, 0))}</td><td class="num">${count(laser)}</td><td class="num"><b>${fullKnown ? fmtFull(full) : '–'}</b></td></tr>` : '';
     return `<div class="job-card${dups.has(normName(j.name)) ? ' dup' : ''}"><h4>${esc(j.name)} <small class="hint">· added ${new Date(j.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}</small></h4>
       <div class="acts"><button type="button" class="btn" data-job-open="${esc(j.id)}">Open</button><button type="button" class="btn" data-job-cut="${esc(j.id)}">Mark as cut…</button><button type="button" class="btn" data-job-del="${esc(j.id)}">Remove</button></div>
       <table class="jobparts"><thead><tr><th>Material</th><th class="num">Circles</th><th class="num">Laser sheets</th><th class="num">Full sheets</th></tr></thead><tbody>${rows}${total}</tbody></table></div>`;
@@ -1751,7 +1762,7 @@ $('jobList').addEventListener('click', (e) => {
   } else if (b.dataset.jobCut) {
     const cuts = j.parts.map(p => ({ p, m: inv.materials.find(x => x.id === p.matId) })).filter(x => x.m && x.p.sheets);
     if (!cuts.length) { alert('None of this job’s materials are in the stock list any more.'); return; }
-    const lines = cuts.map(({ p, m }) => { const pl = planFor(m, p.sheets); return `• ${m.name}: ${count(pl.full)} ${m.cut ? 'full ' : ''}${pl.full === 1 ? 'sheet' : 'sheets'}${pl.fromSpare ? ` and ${count(pl.fromSpare)} spare cut pieces` : ''}${pl.full > m.stock ? ` — stock only shows ${count(m.stock)}, goes to 0` : ''}`; });
+    const lines = cuts.map(({ p, m }) => `• ${cutLine(m, p.sheets)}`);
     if (!confirm(`Mark “${j.name}” as cut? This takes out of stock:\n\n${lines.join('\n')}\n\nand removes the job from the list.`)) return;
     const en = { ...entry(), job: j.name };
     if (change(`Cut job "${j.name}": ${cuts.map(({ p, m }) => `${p.sheets} ${p.sheets === 1 ? 'sheet' : 'sheets'} of ${m.name}`).join(', ')}`, d => {
