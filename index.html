@@ -230,7 +230,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows and
@@ -417,8 +417,8 @@ const state = {
   unit: 'in',
   preset: 0,
   w: 24, h: 24,
-  gap: 0.25,
-  margin: 0.5,
+  gap: 2 / 25.4,     // default 2 mm between circles (page starts in inches)
+  margin: 10 / 25.4, // default 10 mm from the sheet edge
   circles: [{ d: 6, q: 12, u: 'in' }, { d: 3, q: 24, u: 'in' }], // each circle keeps its own unit
 };
 
@@ -484,8 +484,13 @@ function syncUnitsUI() {
 }
 function syncInputs() {
   els.w.value = fmtInput(state.w); els.h.value = fmtInput(state.h);
-  els.gap.value = state.gap; els.gapN.value = fmtInput(state.gap); els.gapV.textContent = fmt(state.gap) + ' ' + unitName();
-  els.margin.value = state.margin; els.marginN.value = fmtInput(state.margin); els.marginV.textContent = fmt(state.margin) + ' ' + unitName();
+  els.gap.value = state.gap; els.gapN.value = fmtInput(state.gap); els.gapV.textContent = spacingLabel(state.gap);
+  els.margin.value = state.margin; els.marginN.value = fmtInput(state.margin); els.marginV.textContent = spacingLabel(state.margin);
+}
+// "0.079 in (2 mm)" when the page is in inches, so the mm defaults stay recognisable.
+function spacingLabel(v) {
+  if (state.unit === 'mm') return fmt(v) + ' mm';
+  return fmt(v) + ' in (' + (Math.round(v * 25.4 * 10) / 10).toLocaleString('en-US') + ' mm)';
 }
 function fmtInput(v) { return String(state.unit === 'mm' ? Math.round(v * 100) / 100 : Math.round(v * 10000) / 10000); }
 
@@ -558,9 +563,9 @@ els.preset.addEventListener('change', () => {
   state.preset = match >= 0 ? match : 'custom'; els.preset.value = state.preset; schedule();
 }));
 function bindSlider(range, num, key) {
-  range.addEventListener('input', () => { state[key] = parseFloat(range.value); num.value = fmtInput(state[key]); $(key + 'V').textContent = fmt(state[key]) + ' ' + unitName(); schedule(); });
+  range.addEventListener('input', () => { state[key] = parseFloat(range.value); num.value = fmtInput(state[key]); $(key + 'V').textContent = spacingLabel(state[key]); schedule(); });
   num.addEventListener('change', () => { if (lenInSheetUnit(num.value) != null) num.value = fmtInput(state[key]); else markBad(num, num.value.trim() !== ''); });
-  num.addEventListener('input', () => { const v = lenInSheetUnit(num.value); if (v == null) return; markBad(num, false); state[key] = v >= 0 ? v : 0; range.value = state[key]; $(key + 'V').textContent = fmt(state[key]) + ' ' + unitName(); schedule(); });
+  num.addEventListener('input', () => { const v = lenInSheetUnit(num.value); if (v == null) return; markBad(num, false); state[key] = v >= 0 ? v : 0; range.value = state[key]; $(key + 'V').textContent = spacingLabel(state[key]); schedule(); });
 }
 bindSlider(els.gap, els.gapN, 'gap');
 bindSlider(els.margin, els.marginN, 'margin');
