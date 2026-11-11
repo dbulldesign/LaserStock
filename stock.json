@@ -121,6 +121,93 @@
    "u": "in"
   }
  ],
- "jobs": [],
+ "jobs": [
+  {
+   "id": "mwcpjnptdowb6",
+   "name": "North Market",
+   "at": "2026-11-11T22:45:46.577Z",
+   "parts": [
+    {
+     "matId": "mwcoofruljgme",
+     "material": "Fade Not Poly - R02",
+     "sheets": 5,
+     "circles": 625,
+     "summary": "610 × MR16 (Ø1.9375 in), 5 × Ø21.86 mm, 5 × Ø1.85 in, 5 × Ø1.54 in"
+    }
+   ],
+   "settings": {
+    "unit": "in",
+    "preset": "Fade Not Poly - R02 - 24 × 24 in",
+    "material": "Fade Not Poly - R02",
+    "sheet": {
+     "width": 24,
+     "height": 24
+    },
+    "spacing": {
+     "betweenCircles": 0.0984251968503937,
+     "fromEdge": 0.3937007874015748
+    },
+    "layout": "best",
+    "circles": [
+     {
+      "diameter": 1.9375,
+      "unit": "in",
+      "quantity": 610,
+      "name": "MR16"
+     },
+     {
+      "diameter": 21.86,
+      "unit": "mm",
+      "quantity": 5
+     },
+     {
+      "diameter": 1.85,
+      "unit": "in",
+      "quantity": 5
+     },
+     {
+      "diameter": 1.54,
+      "unit": "in",
+      "quantity": 5
+     }
+    ],
+    "parts": [
+     {
+      "material": "Fade Not Poly - R02",
+      "preset": "Fade Not Poly - R02 - 24 × 24 in",
+      "sheet": {
+       "width": 24,
+       "height": 24,
+       "unit": "in"
+      },
+      "circles": [
+       {
+        "diameter": 1.9375,
+        "unit": "in",
+        "quantity": 610,
+        "name": "MR16"
+       },
+       {
+        "diameter": 21.86,
+        "unit": "mm",
+        "quantity": 5
+       },
+       {
+        "diameter": 1.85,
+        "unit": "in",
+        "quantity": 5
+       },
+       {
+        "diameter": 1.54,
+        "unit": "in",
+        "quantity": 5
+       }
+      ]
+     }
+    ],
+    "active": 0
+   }
+  }
+ ],
  "history": []
 }
