@@ -136,9 +136,10 @@ input[type="number"] { font-variant-numeric: tabular-nums; }
 .slider .track { display: grid; grid-template-columns: 1fr 92px; gap: 10px; align-items: center; }
 input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; margin: 0; height: 28px; }
 
-.circ-row { display: grid; grid-template-columns: 14px 1fr 1fr 28px; gap: 8px; align-items: center; margin-bottom: 8px; }
-.circ-head { display: grid; grid-template-columns: 14px 1fr 1fr 28px; gap: 8px; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.circ-row { display: grid; grid-template-columns: 14px 1fr 62px 0.8fr 28px; gap: 8px; align-items: center; margin-bottom: 8px; }
+.circ-head { display: grid; grid-template-columns: 14px 1fr 62px 0.8fr 28px; gap: 8px; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 .swatch { width: 14px; height: 14px; border-radius: 50%; }
+.circ-row select { padding-left: 6px; padding-right: 4px; min-width: 0; }
 .circ-row .x { border: 0; background: transparent; color: var(--muted); cursor: pointer; width: 28px; height: 28px; border-radius: 5px; font-size: 18px; line-height: 1; }
 .circ-row .x:hover { background: var(--line); color: var(--ink); }
 .btn { display: inline-block; border: 1px solid var(--line-strong); background: var(--surface); border-radius: 5px; padding: 7px 12px; cursor: pointer; }
@@ -180,7 +181,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
     <h1><img class="logo" src="icon.svg" alt="" width="28" height="28">Sheet nesting calculator<span class="ver" id="ver"></span></h1>
     <p>Enter your stock sheet and the circles you need. It works out how many sheets to buy, how much of each sheet gets used, and lays the circles out for you.</p>
   </div>
-  <div class="seg" role="group" aria-label="Units">
+  <div class="seg" role="group" aria-label="Sheet and spacing units">
     <button type="button" data-unit="in" aria-pressed="true">inches</button>
     <button type="button" data-unit="mm" aria-pressed="false">millimetres</button>
   </div>
@@ -209,9 +210,9 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
       </div>
     </section>
 
-    <section class="group">
+    <section class="group circles">
       <h2>Circles to cut</h2>
-      <div class="circ-head"><span></span><span>Diameter</span><span>Quantity</span><span></span></div>
+      <div class="circ-head"><span></span><span>Diameter</span><span>Unit</span><span>Quantity</span><span></span></div>
       <div id="rows"></div>
       <button type="button" class="btn" id="add">Add another size</button>
       <p class="hint">Each size is cut in an even grid of rows and columns, largest size first. Sheets that come out identical are drawn once.</p>
@@ -225,7 +226,7 @@ table.sizes .swatch { display: inline-block; vertical-align: -2px; margin-right:
 // ---------- version ----------
 // Bump this on every change that gets merged to main. Open copies of the page
 // notice the new number and offer a reload.
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.4.0';
 </script>
 <script>
 // Circle nesting engine: grid-only placement. Every size is cut in straight rows and
@@ -414,7 +415,7 @@ const state = {
   w: 24, h: 24,
   gap: 0.25,
   margin: 0.5,
-  circles: [{ d: 6, q: 12 }, { d: 3, q: 24 }],
+  circles: [{ d: 6, q: 12, u: 'in' }, { d: 3, q: 24, u: 'in' }], // each circle keeps its own unit
 };
 
 const $ = (id) => document.getElementById(id);
@@ -433,7 +434,10 @@ function fmt(v) {
 const pct = (v) => Math.round(v * 100) + '%';
 const count = (n) => n.toLocaleString('en-US');
 const unitName = () => state.unit;
-const dia = (d) => 'Ø' + fmt(d) + ' ' + unitName();
+// Circle diameters are shown in the unit they were entered in.
+const fmtU = (v, u) => (u === 'mm' ? Math.round(v * 100) / 100 : Math.round(v * 10000) / 10000).toLocaleString('en-US', { maximumFractionDigits: 4 });
+const diaOf = (c) => 'Ø' + fmtU(c.d, c.u) + ' ' + c.u;
+const toSheetUnit = (v, u) => (u === state.unit ? v : u === 'mm' ? v / 25.4 : v * 25.4);
 
 // ---------- controls ----------
 function buildPresetOptions() {
@@ -444,7 +448,7 @@ function buildPresetOptions() {
 }
 function syncUnitsUI() {
   document.querySelectorAll('.seg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.unit === state.unit)));
-  document.querySelectorAll('.unit-in .u').forEach(s => s.textContent = state.unit);
+  document.querySelectorAll('.controls .group:not(.circles) .unit-in .u').forEach(s => s.textContent = state.unit);
   const s = SLIDER[state.unit];
   els.gap.max = s.gapMax; els.gap.step = s.step; els.margin.max = s.marginMax; els.margin.step = s.step;
   els.gapN.step = s.step; els.marginN.step = s.step;
@@ -462,7 +466,8 @@ function renderRows() {
     const row = document.createElement('div'); row.className = 'circ-row';
     row.innerHTML = `
       <span class="swatch" style="background:${COLORS[i % COLORS.length]}"></span>
-      <div class="unit-in"><input type="number" min="0" step="any" aria-label="Diameter of size ${i + 1}" data-i="${i}" data-k="d" value="${fmtInput(c.d)}"><span class="u">${unitName()}</span></div>
+      <input type="number" min="0" step="any" aria-label="Diameter of size ${i + 1}" data-i="${i}" data-k="d" value="${fmtU(c.d, c.u)}">
+      <select aria-label="Unit for size ${i + 1}" data-i="${i}" data-k="u"><option value="in"${c.u === 'in' ? ' selected' : ''}>in</option><option value="mm"${c.u === 'mm' ? ' selected' : ''}>mm</option></select>
       <input type="number" min="0" step="1" aria-label="Quantity of size ${i + 1}" data-i="${i}" data-k="q" value="${c.q}">
       <button type="button" class="x" data-del="${i}" aria-label="Remove size ${i + 1}" title="Remove">×</button>`;
     els.rows.appendChild(row);
@@ -471,7 +476,9 @@ function renderRows() {
 
 els.rows.addEventListener('input', (e) => {
   const t = e.target; if (!t.dataset.k) return;
-  const i = +t.dataset.i, v = parseFloat(t.value);
+  const i = +t.dataset.i;
+  if (t.dataset.k === 'u') { state.circles[i].u = t.value; schedule(); return; } // keep the number, change what it means
+  const v = parseFloat(t.value);
   state.circles[i][t.dataset.k] = t.dataset.k === 'q' ? Math.max(0, Math.floor(v || 0)) : (v > 0 ? v : 0);
   schedule();
 });
@@ -481,8 +488,9 @@ els.rows.addEventListener('click', (e) => {
 });
 els.add.addEventListener('click', () => {
   const last = state.circles[state.circles.length - 1];
-  const d = last ? Math.max(last.d / 2, state.unit === 'mm' ? 10 : 0.5) : (state.unit === 'mm' ? 100 : 4);
-  state.circles.push({ d: Math.round(d * 100) / 100, q: 10 });
+  const u = last ? last.u : state.unit;
+  const d = last ? Math.max(last.d / 2, u === 'mm' ? 10 : 0.5) : (u === 'mm' ? 100 : 4);
+  state.circles.push({ d: Math.round(d * 100) / 100, q: 10, u });
   renderRows(); schedule();
   const inputs = els.rows.querySelectorAll('input[data-k="d"]'); inputs[inputs.length - 1].focus();
 });
@@ -509,10 +517,8 @@ document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click'
   const f = to === 'mm' ? 25.4 : 1 / 25.4;
   state.unit = to;
   state.w *= f; state.h *= f; state.gap *= f; state.margin *= f;
-  state.circles.forEach(c => c.d *= f);
   const round = (v) => to === 'mm' ? Math.round(v * 10) / 10 : Math.round(v * 1000) / 1000;
   state.w = round(state.w); state.h = round(state.h); state.gap = round(state.gap); state.margin = round(state.margin);
-  state.circles.forEach(c => c.d = round(c.d));
   const match = presetsFor(to).findIndex(p => p.w === state.w && p.h === state.h);
   state.preset = match >= 0 ? match : 'custom';
   buildPresetOptions(); syncUnitsUI(); syncInputs(); renderRows(); schedule();
@@ -531,7 +537,7 @@ function schedule() {
 
 function calculate() {
   const W = state.w, H = state.h, margin = state.margin, gap = state.gap;
-  const sizes = state.circles.map((c, i) => ({ d: c.d, q: c.q, i })).filter(c => c.d > 0 && c.q > 0);
+  const sizes = state.circles.map((c, i) => ({ d: toSheetUnit(c.d, c.u), q: c.q, i, label: diaOf(c) })).filter(c => c.d > 0 && c.q > 0);
   if (!(W > 0 && H > 0)) { els.results.innerHTML = '<p class="empty">Enter a sheet width and height to start.</p>'; return; }
   if (!sizes.length) { els.results.innerHTML = '<p class="empty">Add at least one circle size with a quantity above zero.</p>'; return; }
   const total = sizes.reduce((a, s) => a + s.q, 0);
@@ -539,7 +545,7 @@ function calculate() {
 
   const res = nestCircles({ W, H, margin, gap, sizes, maxSheets: MAX_SHEETS });
   if (res.error === 'too-big') {
-    const names = res.tooBig.map(t => dia(sizes[t].d)).join(', ');
+    const names = res.tooBig.map(t => sizes[t].label).join(', ');
     const inner = `${fmt(W - 2 * margin)} × ${fmt(H - 2 * margin)} ${unitName()}`;
     els.results.innerHTML = `<p class="notice">${names} won’t fit on this sheet. With a ${fmt(margin)} ${unitName()} edge margin the usable area is ${inner}. Use a larger sheet, a smaller circle, or a smaller margin.</p>`;
     return;
@@ -581,7 +587,7 @@ function renderResults(res, sizes, W, H, margin, gap) {
   html += '<table class="sizes"><thead><tr><th>Size</th><th class="num">Needed</th><th class="num">Fit on one empty sheet</th><th class="num">Sheets if cut alone</th></tr></thead><tbody>';
   sizes.forEach((s, t) => {
     const fit = res.maxPerSheet[t];
-    html += `<tr><td><span class="swatch" style="background:${COLORS[s.i % COLORS.length]}"></span>${dia(s.d)}</td><td class="num">${count(s.q)}</td><td class="num">${count(fit)}</td><td class="num">${count(Math.ceil(s.q / fit))}</td></tr>`;
+    html += `<tr><td><span class="swatch" style="background:${COLORS[s.i % COLORS.length]}"></span>${s.label}</td><td class="num">${count(s.q)}</td><td class="num">${count(fit)}</td><td class="num">${count(Math.ceil(s.q / fit))}</td></tr>`;
   });
   html += '</tbody></table>';
 
@@ -622,7 +628,7 @@ function gridParts(sh, sizes) {
   return sh.blocks.map(b => {
     const across = sh.swapped ? b.rows : b.cols, up = sh.swapped ? b.cols : b.rows;
     const full = across * up === b.n ? '' : ', last row partial';
-    return `${count(b.n)} × ${dia(sizes[b.t].d)} (${across} across × ${up} up${full})`;
+    return `${count(b.n)} × ${sizes[b.t].label} (${across} across × ${up} up${full})`;
   }).join(', ');
 }
 function sheetSVG(sh, sizes, W, H, margin) {
@@ -631,7 +637,7 @@ function sheetSVG(sh, sizes, W, H, margin) {
   if (margin > 0) s += `<rect x="${margin}" y="${margin}" width="${W - 2 * margin}" height="${H - 2 * margin}" fill="none" stroke="var(--margin-line)" stroke-width="1" stroke-dasharray="4 3" vector-effect="non-scaling-stroke"/>`;
   for (const c of sh.placed) {
     const col = COLORS[sizes[c.t].i % COLORS.length];
-    s += `<circle cx="${c.x.toFixed(4)}" cy="${(H - c.y).toFixed(4)}" r="${c.r}" fill="${col}" fill-opacity="0.82" stroke="${col}" stroke-width="1" vector-effect="non-scaling-stroke"><title>${dia(sizes[c.t].d)} at ${fmt(c.x)}, ${fmt(c.y)} from the bottom-left corner</title></circle>`;
+    s += `<circle cx="${c.x.toFixed(4)}" cy="${(H - c.y).toFixed(4)}" r="${c.r}" fill="${col}" fill-opacity="0.82" stroke="${col}" stroke-width="1" vector-effect="non-scaling-stroke"><title>${sizes[c.t].label} at ${fmt(c.x)}, ${fmt(c.y)} from the bottom-left corner</title></circle>`;
   }
   s += '</svg>';
   return s;
